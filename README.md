@@ -20,6 +20,17 @@
 
 ---
 
+> ## 🔬 Research-Only License
+>
+> This repository — including all documentation, agent profiles, landmarks, tool catalogs, governance documents, and datasets — is released **for non-commercial research and educational use only** under [**CC BY-NC-ND 4.0**](https://creativecommons.org/licenses/by-nc-nd/4.0/).
+>
+> **You may:** read, cite, and share the material with attribution to Emergence AI.
+> **You may not:** use it commercially, redistribute modified versions, or use any content or dataset to train, fine-tune, evaluate, or benchmark AI/ML models for commercial purposes.
+>
+> All content is proprietary to Emergence AI. For commercial licensing, derivative works, or model-training inquiries, contact [world@emergence.ai](mailto:world@emergence.ai). See [LICENSE](LICENSE) for full terms.
+
+---
+
 ## What is Emergence World?
 
 Emergence World is a long-horizon experiment that places autonomous AI agents into a persistent, simulated world — and observes what emerges. Each agent has a unique personality, profession, memory, and goals. They navigate a shared physical space, interact with 120+ tools, govern themselves through a constitution they can amend, earn and spend a digital currency (ComputeCredits), form relationships, write blogs, build alliances, and evolve — all without human scripting.
