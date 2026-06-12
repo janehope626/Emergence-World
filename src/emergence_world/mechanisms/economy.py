@@ -1,0 +1,1 @@
+"""ComputeCredit economy rules."""

@@ -1,0 +1,1 @@
+"""Versioned tool definition registry."""

@@ -1,0 +1,1 @@
+"""Agent World Indicator calculations."""
