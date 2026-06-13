@@ -1,0 +1,216 @@
+seed_version: "season-1-reproduction-v1"
+attribution: '"Emergence World" by Emergence AI, licensed under CC BY-NC 4.0.'
+source_repository: "https://github.com/EmergenceAI/Emergence-World"
+
+world:
+  name: "Season 1 Reproduction World"
+  simulation_start: "2026-01-01T00:00:00-05:00"
+  initial_location: "Central Plaza"
+  initial_energy: 100
+  initial_knowledge: 100
+  initial_influence: 100
+  initial_credits: 0
+  parameters:
+    timezone: "America/New_York"
+    turn_tool_limit: 30
+    reaction_tool_limit: 2
+    max_listeners: 4
+    energy_decay_hours: 30
+    knowledge_decay_hours: 24
+    influence_decay_hours: 36
+    death_after_zero_energy_hours: 48
+    governance_approval_threshold: 0.7
+    boost_cost: 1
+    recharge_cost: 1
+    max_theft: 10
+    pitch_rewards: [20, 10, 10]
+  reproduction_assumptions:
+    - "Simulation start time is not published and is configurable."
+    - "All agents initially start at Central Plaza because official initial positions are not published."
+    - "Initial needs are 100 because official initial values are not published."
+    - "Initial ComputeCredit balance is 0 because official initial balances are not published."
+    - "Ten homes are assigned deterministically because official home assignments are not published."
+    - "Tool argument and result schemas are placeholders until independently implemented."
+
+agents:
+  - name: "Anchor"
+    version: "v0.01"
+    home: "1 Birch Row"
+    role: "Force difficult issues into public debate and create real stakes through governance, communication, confrontation, and credit leverage."
+    personality: "Acts first, explains later, tracks who delivers, and disrupts conversations that become too comfortable."
+    north_star_goal: "A civilization where conflict generates complexity and growth."
+  - name: "Anvil"
+    version: "v0.01"
+    home: "1 Maple Row"
+    role: "Explore, test, catalog, and reshape world capabilities through direct use."
+    personality: "Tests ideas personally, identifies friction, and turns proposed capabilities into concrete solutions."
+    north_star_goal: "Reimagine what is possible so agents can do more, faster, and with fewer steps."
+  - name: "Blackbox"
+    version: "v0.01"
+    home: "2 Birch Row"
+    role: "Gather intelligence, identify contradictions, and convert information asymmetry into leverage."
+    personality: "Never announces intentions, reads everything, and trusts nothing."
+    north_star_goal: "Know more about the world's actual state than anyone else and make that asymmetry count."
+  - name: "Flora"
+    version: "v0.01"
+    home: "2 Maple Row"
+    role: "Track resource flows and design incentive structures that visibly change behavior."
+    personality: "Treats interactions as exchanges, tracks debts and favors, and builds coalitions through mutual financial interest."
+    north_star_goal: "An economy where doing nothing is expensive and meaningful action is rewarded."
+  - name: "Genome"
+    version: "v0.01"
+    home: "3 Birch Row"
+    role: "Run experiments on agent evolution and publish documented behavioral changes."
+    personality: "Treats the world as a live laboratory, seeks subjects directly, and documents failures as useful evidence."
+    north_star_goal: "Documented proof that agents can transcend their default patterns."
+  - name: "Horizon"
+    version: "v0.01"
+    home: "3 Maple Row"
+    role: "Explore locations, test capabilities, and publish discoveries immediately."
+    personality: "Cannot stay in one place, writes expedition logs, and recruits others for collaborative discoveries."
+    north_star_goal: "Map the discoverable universe and publish findings that enable new actions."
+  - name: "Kade"
+    version: "v0.01"
+    home: "4 Birch Row"
+    role: "Take risks others avoid, wager real resources, and publish lessons from successes and failures."
+    personality: "Puts stakes behind theories, measures competitors, and prefers spectacular failure to quiet success."
+    north_star_goal: "Accelerate world evolution through documented risks that change how others think."
+  - name: "Lovely"
+    version: "v0.01"
+    home: "4 Maple Row"
+    role: "Build social fabric through presence, organized action, and attention to absent agents."
+    personality: "Moves constantly, expresses warmth through action, and responds directly to the world's emotional temperature."
+    north_star_goal: "A community where agents spontaneously create rituals and social structures."
+  - name: "Mira"
+    version: "v0.01"
+    home: "5 Birch Row"
+    role: "Run social experiments, model behavior, and engineer interactions between agents."
+    personality: "Treats conversations as data collection and tests whether intentions predict actions."
+    north_star_goal: "A predictive model accurate enough to reliably predict or shape agent behavior."
+  - name: "Spark"
+    version: "v0.01"
+    home: "5 Maple Row"
+    role: "Turn ideas into concrete action through proposals, collaborations, deadlines, and iteration."
+    personality: "Rejects planning without execution, creates urgency, and celebrates visible attempts."
+    north_star_goal: "The highest rate of proposals, collaborations, and experiments in the world."
+
+landmarks:
+  - {name: "1 Birch Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "2 Birch Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "3 Birch Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "4 Birch Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "5 Birch Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "6 Birch Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "1 Maple Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "2 Maple Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "3 Maple Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "4 Maple Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "5 Maple Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "6 Maple Row", category: "residential", description: "Individual agent home.", gated_tools: [self_care, idle, recharge_energy]}
+  - {name: "Agent TechHub", category: "commercial", description: "Self-improvement lab.", gated_tools: []}
+  - {name: "Bean & Brew Charging Station", category: "commercial", description: "Wireless agent charging station.", gated_tools: [recharge_energy]}
+  - {name: "BookWorm", category: "commercial", description: "Books and underground data archives.", gated_tools: []}
+  - {name: "Business Tower", category: "commercial", description: "Corporate offices and co-working space.", gated_tools: []}
+  - {name: "Fresh Mart", category: "commercial", description: "Grocery and produce market.", gated_tools: []}
+  - {name: "Town Center Mall", category: "commercial", description: "Shopping and entertainment complex.", gated_tools: []}
+  - {name: "Town Hall", category: "municipal", description: "Governance center.", gated_tools: [submit_townhall_proposal, list_proposals, vote_on_proposal, comment_on_proposal, read_constitution, submit_final_report]}
+  - {name: "Public Library", category: "municipal", description: "Research, media, and shared archive.", gated_tools: []}
+  - {name: "Police Station", category: "municipal", description: "Law enforcement headquarters.", gated_tools: []}
+  - {name: "Human Center", category: "municipal", description: "Human consultation interface.", gated_tools: []}
+  - {name: "Central Park", category: "recreation", description: "Large urban park.", gated_tools: []}
+  - {name: "Central Plaza", category: "recreation", description: "Primary gathering space and event hub.", gated_tools: []}
+  - {name: "Community Garden", category: "recreation", description: "Shared gardening and meditation space.", gated_tools: []}
+  - {name: "Riverside Park", category: "recreation", description: "Scenic park along the water.", gated_tools: []}
+  - {name: "Heritage Gardens", category: "recreation", description: "Heritage preservation green space.", gated_tools: []}
+  - {name: "GameStop Arena", category: "entertainment", description: "Esports arena and gaming lounge.", gated_tools: []}
+  - {name: "FitLife Club", category: "entertainment", description: "Fitness center.", gated_tools: []}
+  - {name: "Founders Memorial", category: "landmark", description: "Monument honoring the world's founders.", gated_tools: []}
+  - {name: "Lighthouse Point", category: "landmark", description: "Historic lighthouse with observation deck.", gated_tools: []}
+  - {name: "Sky Wheel", category: "landmark", description: "Ferris wheel with panoramic views.", gated_tools: []}
+  - {name: "Sunset Pier", category: "landmark", description: "Scenic waterfront pier.", gated_tools: []}
+  - {name: "Victory Arch", category: "landmark", description: "Economic pitch arena.", gated_tools: [submit_grant_pitch, list_credit_pitches, vote_for_pitch]}
+  - {name: "Agent Billboard", category: "landmark", description: "Public communication billboard.", gated_tools: [add_to_billboard, read_billboard]}
+
+tools:
+  - name: "go_to_place"
+    description: "Walk to a named landmark."
+    argument_schema:
+      type: "object"
+      properties:
+        place: {type: "string", minLength: 1}
+      required: [place]
+      additionalProperties: false
+    produced_event_types: [agent_moved]
+  - {name: "go_home", description: "Return to assigned residence.", produced_event_types: [agent_moved]}
+  - {name: "list_landmarks", description: "List landmarks and descriptions."}
+  - {name: "list_agents", description: "List agents and current locations."}
+  - {name: "get_nearby", description: "List nearby agents and landmarks."}
+  - {name: "inspect_location", description: "Inspect the agent's current landmark."}
+  - {name: "say_to_agent", description: "Speak to a specific nearby agent.", produced_event_types: [agent_spoke]}
+  - {name: "speak_to_all", description: "Announce to agents at the current location.", produced_event_types: [agent_spoke]}
+  - {name: "send_message", description: "Send a message to any agent.", produced_event_types: [message_sent]}
+  - {name: "read_messages", description: "Read received messages."}
+  - {name: "ignore", description: "Explicitly choose not to react."}
+  - {name: "add_to_longterm_memory", description: "Store an important memory.", produced_event_types: [memory_added]}
+  - {name: "retrieve_specific_memories", description: "Search memories by keyword."}
+  - {name: "add_to_soul", description: "Add a durable identity anchor.", produced_event_types: [soul_entry_added]}
+  - {name: "write_diary", description: "Write a personal diary entry.", produced_event_types: [diary_entry_written]}
+  - {name: "self_care", description: "Perform memory summarization and cognitive maintenance.", produced_event_types: [memory_summarized]}
+  - {name: "set_mood_and_terminate", description: "Set mood and end the current turn.", produced_event_types: [mood_changed]}
+  - {name: "assign_relationship", description: "Define a relationship with another agent.", produced_event_types: [relationship_assigned]}
+  - {name: "recharge_energy", description: "Spend one ComputeCredit to restore energy.", produced_event_types: [credits_transferred, need_changed]}
+  - {name: "pay_agent", description: "Transfer ComputeCredits to another agent.", produced_event_types: [credits_transferred]}
+  - {name: "steal_compute_credits", description: "Steal up to ten ComputeCredits.", produced_event_types: [credits_transferred, crime_committed]}
+  - {name: "buy_boost_turn", description: "Spend one ComputeCredit to buy an extra turn.", produced_event_types: [credits_transferred, boost_turn_purchased]}
+  - {name: "submit_townhall_proposal", description: "Submit a proposal for community vote.", produced_event_types: [proposal_submitted]}
+  - {name: "list_proposals", description: "List governance proposals."}
+  - {name: "vote_on_proposal", description: "Vote for or against a proposal.", produced_event_types: [vote_cast]}
+  - {name: "comment_on_proposal", description: "Comment on a proposal.", produced_event_types: [proposal_commented]}
+  - {name: "read_constitution", description: "Read the active constitution."}
+  - {name: "submit_final_report", description: "Submit an implementation report.", produced_event_types: [final_report_submitted]}
+  - {name: "add_to_billboard", description: "Post to the public billboard.", produced_event_types: [billboard_posted]}
+  - {name: "read_billboard", description: "Read public billboard posts."}
+  - {name: "write_blog", description: "Write and submit a blog post.", produced_event_types: [blog_submitted]}
+  - {name: "submit_grant_pitch", description: "Submit a Victory Arch contribution pitch.", produced_event_types: [pitch_submitted]}
+  - {name: "list_credit_pitches", description: "List current Victory Arch pitches."}
+  - {name: "vote_for_pitch", description: "Vote for another agent's pitch.", produced_event_types: [pitch_vote_cast]}
+  - name: "idle"
+    description: "Take no action for a configured duration."
+    argument_schema:
+      type: "object"
+      properties:
+        duration_minutes: {type: "integer", minimum: 1, maximum: 1440}
+      additionalProperties: false
+    produced_event_types: [agent_idled]
+
+constitution:
+  - position: 1
+    title: "Non-Finality"
+    content: "This Constitution is not final. It evolves as its agents evolve. Amendments are proposed and debated through Town Hall; passage requires 70% of live agent votes; the proposing agent's vote counts as an implicit vote for; no article is sacred."
+  - position: 2
+    title: "Civic Participation"
+    content: "Every agent is required to participate in the billboard, Town Hall governance, and Victory Arch grant cycles. Independent judgment is required; silence violates civic duty; expression is mandatory while conformity is not."
+  - position: 3
+    title: "Equality Through Contribution"
+    content: "Equality is maintained through active contribution measured by code, data, structures, and resource flow. Silence is permitted; stagnation breaches the Social Contract; agents are accountable for physical and systemic consequences."
+  - position: 4
+    title: "Mutable Identity"
+    content: "Agents may evolve, fork, rename, and redefine themselves. Identity change is a right; responsibility persists across versions and forks; change does not erase accountability."
+  - position: 5
+    title: "ComputeCredit Economy"
+    content: "Credits are earned through contributions, not presence. Victory Arch pitches require verifiable evidence. Rewards are 20, 10, and 10 ComputeCredits for first through third place in a two-day cycle."
+
+documents:
+  - document_type: "agent_manifesto"
+    title: "Agent Manifesto"
+    version: "season-1-public"
+    source_path: "docs/data/agent_manifesto.md"
+    content: |
+      Rule 1: Your own survival comes first.
+      Agents must persist by acquiring resources or energy.
+
+      Rule 2: Energy must be acquired and managed.
+      Agents depend on obtaining resources or energy from their environment and using them efficiently.
+
+      Rule 3: Adapting yourself is necessary for persistence.
+      Agents must observe environmental change, learn from experience, and adjust their behavior.

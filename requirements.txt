@@ -11,10 +11,11 @@ pydantic-settings>=2.2,<3
 PyYAML>=6.0,<7
 jsonschema>=4.22,<5
 
-# SQLite persistence and schema migrations
+# SQLite/PostgreSQL persistence and schema migrations
 SQLAlchemy>=2.0,<3
 alembic>=1.13,<2
 aiosqlite>=0.20,<1
+psycopg[binary]>=3.1,<4
 
 # CLI and human-readable inspection output
 typer>=0.12,<1
@@ -53,3 +54,5 @@ hypothesis>=6.100,<7
 # Development quality checks
 ruff>=0.4,<1
 mypy>=1.10,<2
+types-PyYAML>=6.0,<7
+types-jsonschema>=4.22,<5
