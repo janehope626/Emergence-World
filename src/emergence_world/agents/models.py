@@ -75,6 +75,13 @@ class ToolDefinitionView(ContractModel):
     argument_schema: dict[str, Any]
 
 
+class RecentEventView(ContractModel):
+    event_id: str
+    event_type: str
+    payload: dict[str, Any]
+    simulation_time: datetime
+
+
 class AgentContext(ContractModel):
     """Complete read-only information visible to an agent for one decision."""
 
@@ -87,6 +94,7 @@ class AgentContext(ContractModel):
     relationships: tuple[RelationshipView, ...] = ()
     constitution: tuple[ConstitutionArticleView, ...] = ()
     available_tools: tuple[ToolDefinitionView, ...] = ()
+    recent_events: tuple[RecentEventView, ...] = ()
     simulation_time: datetime
 
     @model_validator(mode="after")
@@ -142,7 +150,6 @@ class AgentTurnResult(ContractModel):
     reasoning_log: tuple[str, ...]
     calls_used: int = Field(ge=0)
     termination_reason: Literal[
-        "provider_terminated",
-        "tool_call_budget_exhausted",
-        "no_tool_calls",
+        "provider_done",
+        "max_tool_calls_reached",
     ]

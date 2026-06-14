@@ -216,10 +216,47 @@ class Turn(Base):
     context_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     provider: Mapped[str | None] = mapped_column(String(100))
     model_name: Mapped[str | None] = mapped_column(String(200))
+    stop_reason: Mapped[str | None] = mapped_column(String(100))
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProviderInteraction(Base):
+    __tablename__ = "provider_interactions"
+    __table_args__ = (
+        UniqueConstraint("turn_id", "sequence_number"),
+        CheckConstraint("sequence_number >= 1", name="sequence_positive"),
+        ForeignKeyConstraint(
+            ["world_id", "turn_id"],
+            ["turns.world_id", "turns.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    turn_id: Mapped[str] = mapped_column(ID, index=True)
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    provider: Mapped[str] = mapped_column(String(100))
+    model_name: Mapped[str] = mapped_column(String(200))
+    request_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    raw_response_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    parsed_tool_calls_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list
+    )
+    parse_error: Mapped[str | None] = mapped_column(Text)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    total_tokens: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[float | None] = mapped_column(Float)
+    cost_usd: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
 
 
 class BoostTurnRequest(Base):

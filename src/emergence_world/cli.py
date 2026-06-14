@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -19,7 +20,10 @@ from emergence_world.db.models import (
     Agent,
     AgentState,
     Landmark,
+    ProviderInteraction,
+    ToolCall,
     ToolDefinition,
+    Turn,
     World,
     WorldEvent,
 )
@@ -31,8 +35,10 @@ from emergence_world.db.session import (
 )
 from emergence_world.seed import import_seed_bundle, load_seed_bundle
 from emergence_world.metrics.awi import calculate_awi
+from emergence_world.agents.models import AgentDecision, RequestedToolCall
+from emergence_world.agents.providers.scripted import ScriptedProvider
 from emergence_world.tools import ManualToolExecutor
-from emergence_world.world.runtime import step_world
+from emergence_world.world.runtime import autonomous_step_world, step_world
 from emergence_world.world.state import current_snapshot, replay_snapshot, snapshot_hash
 
 app = typer.Typer(name="world", no_args_is_help=True)
@@ -314,6 +320,193 @@ def run(
             "state_hash": state_hash,
         }
     )
+
+
+def scripted_turn_provider(sequence: int) -> ScriptedProvider:
+    return ScriptedProvider(
+        [
+            AgentDecision(
+                tool_calls=(
+                    RequestedToolCall(
+                        call_id=f"scripted-{sequence}",
+                        tool_name="go_to_place",
+                        arguments={"place": "Central Plaza"},
+                    ),
+                )
+            ),
+            AgentDecision(terminate=True),
+        ]
+    )
+
+
+async def run_one_autonomous_turn(
+    session_factory: sessionmaker[Session],
+    world_id: str,
+    provider: ScriptedProvider,
+    minutes: int,
+) -> Any:
+    with sync_transaction(session_factory) as session:
+        return await autonomous_step_world(session, world_id, provider, minutes)
+
+
+@app.command("run-autonomous")
+def run_autonomous(
+    turns: int = typer.Option(..., min=1, help="Number of autonomous turns."),
+    provider: str = typer.Option("scripted", help="Decision provider."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+    world: str | None = typer.Option(
+        None, help="World name when database has several."
+    ),
+    minutes: int = typer.Option(30, min=1, help="Simulated minutes advanced per turn."),
+) -> None:
+    """Run audited autonomous turns using the deterministic scripted provider."""
+
+    if provider != "scripted":
+        raise typer.BadParameter("only the scripted provider is currently supported")
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        world_id = resolve_world_id(session, world)
+    completed = 0
+    last = None
+    for sequence in range(1, turns + 1):
+        try:
+            last = asyncio.run(
+                run_one_autonomous_turn(
+                    session_factory,
+                    world_id,
+                    scripted_turn_provider(sequence),
+                    minutes,
+                )
+            )
+        except ValueError as exc:
+            if str(exc) != "world has no live agents":
+                raise
+            break
+        completed += 1
+    with session_factory() as session:
+        state_hash = snapshot_hash(current_snapshot(session, world_id))
+    console.print_json(
+        data={
+            "turns": completed,
+            "turns_requested": turns,
+            "last_turn_id": last.turn_id if last is not None else None,
+            "last_agent": last.agent_name if last is not None else None,
+            "last_stop_reason": last.stop_reason if last is not None else None,
+            "state_hash": state_hash,
+        }
+    )
+
+
+@app.command("inspect-turn")
+def inspect_turn(
+    turn_id: str,
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+) -> None:
+    """Inspect one turn and its tool-call outcomes."""
+
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        turn = session.get(Turn, turn_id)
+        if turn is None:
+            raise typer.BadParameter(f"unknown turn: {turn_id}")
+        calls = session.scalars(
+            select(ToolCall)
+            .where(ToolCall.turn_id == turn_id)
+            .order_by(ToolCall.sequence_number)
+        ).all()
+        console.print_json(
+            data={
+                "id": turn.id,
+                "world_id": turn.world_id,
+                "agent_id": turn.agent_id,
+                "sequence_number": turn.sequence_number,
+                "turn_type": turn.turn_type.value,
+                "status": turn.status.value,
+                "tool_call_budget": turn.tool_call_budget,
+                "tool_calls_used": turn.tool_calls_used,
+                "provider": turn.provider,
+                "model_name": turn.model_name,
+                "stop_reason": turn.stop_reason,
+                "context_version": turn.context_version,
+                "context_hash": turn.context_hash,
+                "tool_calls": [
+                    {
+                        "sequence_number": call.sequence_number,
+                        "tool_name": call.tool_name,
+                        "status": call.status.value,
+                        "result": call.result_json,
+                        "error": call.error,
+                    }
+                    for call in calls
+                ],
+            }
+        )
+
+
+@app.command("inspect-context")
+def inspect_context(
+    turn_id: str,
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+) -> None:
+    """Inspect the immutable context supplied at the start of a turn."""
+
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        turn = session.get(Turn, turn_id)
+        if turn is None:
+            raise typer.BadParameter(f"unknown turn: {turn_id}")
+        console.print_json(
+            data={
+                "context_version": turn.context_version,
+                "context_hash": turn.context_hash,
+                "context": turn.context_json,
+            }
+        )
+
+
+@app.command("inspect-provider-responses")
+def inspect_provider_responses(
+    turn_id: str,
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+) -> None:
+    """Inspect audited provider requests, raw responses, and parsed tool calls."""
+
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        interactions = session.scalars(
+            select(ProviderInteraction)
+            .where(ProviderInteraction.turn_id == turn_id)
+            .order_by(ProviderInteraction.sequence_number)
+        ).all()
+        if not interactions and session.get(Turn, turn_id) is None:
+            raise typer.BadParameter(f"unknown turn: {turn_id}")
+        console.print_json(
+            data=[
+                {
+                    "sequence_number": item.sequence_number,
+                    "provider": item.provider,
+                    "model_name": item.model_name,
+                    "request": item.request_json,
+                    "raw_response": item.raw_response_json,
+                    "parsed_tool_calls": item.parsed_tool_calls_json,
+                    "parse_error": item.parse_error,
+                    "input_tokens": item.input_tokens,
+                    "output_tokens": item.output_tokens,
+                    "total_tokens": item.total_tokens,
+                    "latency_ms": item.latency_ms,
+                    "cost_usd": item.cost_usd,
+                }
+                for item in interactions
+            ]
+        )
 
 
 @app.command("replay")

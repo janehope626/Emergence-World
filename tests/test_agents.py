@@ -152,7 +152,7 @@ def test_runtime_enforces_tool_call_budget() -> None:
     result = asyncio.run(AgentTurnRuntime(provider, executor).run(context, 2))
 
     assert result.calls_used == 2
-    assert result.termination_reason == "tool_call_budget_exhausted"
+    assert result.termination_reason == "max_tool_calls_reached"
     assert [call.call_id for call in executor.calls] == ["0", "1"]
 
 
@@ -167,7 +167,7 @@ def test_reasoning_text_has_no_side_effect() -> None:
 
     assert executor.calls == []
     assert result.reasoning_log == ("I moved to the library.",)
-    assert result.termination_reason == "provider_terminated"
+    assert result.termination_reason == "provider_done"
 
 
 def test_manual_provider_accepts_researcher_decision() -> None:

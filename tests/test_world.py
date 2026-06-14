@@ -197,3 +197,33 @@ def test_cli_run_commits_progress_when_population_dies(tmp_path: Path) -> None:
     assert '"turns": 1' in run.stdout
     assert '"turns_requested": 5' in run.stdout
     assert replay.exit_code == 0
+
+
+def test_cli_runs_and_inspects_autonomous_turn(tmp_path: Path) -> None:
+    database = tmp_path / "autonomous-cli.db"
+    runner = CliRunner()
+    assert runner.invoke(app, ["init", "--database", str(database)]).exit_code == 0
+
+    run = runner.invoke(
+        app,
+        ["run-autonomous", "--turns", "2", "--provider", "scripted", "--database", str(database)],
+    )
+    assert run.exit_code == 0
+    assert '"last_stop_reason": "provider_done"' in run.stdout
+
+    session_factory = create_sync_session_factory(
+        create_sync_database_engine(sync_sqlite_url(database))
+    )
+    with session_factory() as session:
+        turn_id = session.scalar(select(Turn.id).order_by(Turn.sequence_number))
+    assert turn_id is not None
+
+    inspected = runner.invoke(app, ["inspect-turn", turn_id, "--database", str(database)])
+    context = runner.invoke(app, ["inspect-context", turn_id, "--database", str(database)])
+    responses = runner.invoke(
+        app, ["inspect-provider-responses", turn_id, "--database", str(database)]
+    )
+    assert inspected.exit_code == context.exit_code == responses.exit_code == 0
+    assert '"stop_reason": "provider_done"' in inspected.stdout
+    assert '"context_hash":' in context.stdout
+    assert '"raw_response":' in responses.stdout

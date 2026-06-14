@@ -15,6 +15,7 @@ from emergence_world.agents.models import (
     MemoryView,
     NearbyAgentView,
     RelationshipView,
+    RecentEventView,
     ToolDefinitionView,
 )
 
@@ -36,6 +37,7 @@ class AgentContextBuilder:
         relationships: Iterable[RelationshipView] = (),
         constitution: Iterable[ConstitutionArticleView] = (),
         available_tools: Iterable[ToolDefinitionView] = (),
+        recent_events: Iterable[RecentEventView] = (),
     ) -> AgentContext:
         return AgentContext(
             context_version=self.context_version,
@@ -57,6 +59,12 @@ class AgentContextBuilder:
             ),
             available_tools=tuple(
                 sorted(available_tools, key=lambda item: (item.name, item.version))
+            ),
+            recent_events=tuple(
+                sorted(
+                    recent_events,
+                    key=lambda item: (item.simulation_time, item.event_id),
+                )
             ),
         )
 
