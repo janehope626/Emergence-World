@@ -47,3 +47,9 @@ class ToolCallStatus(StrEnum):
     VALIDATION_FAILED = "validation_failed"
     SUCCEEDED = "succeeded"
     EXECUTION_FAILED = "execution_failed"
+
+
+class ProposalStatus(StrEnum):
+    ACTIVE = "active"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"

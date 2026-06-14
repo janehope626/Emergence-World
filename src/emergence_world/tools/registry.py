@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 
 from emergence_world.db.models import ToolDefinition
 from emergence_world.tools.handlers.core import CORE_HANDLERS, HandlerOutput
+from emergence_world.tools.handlers.economy import ECONOMY_HANDLERS
+from emergence_world.tools.handlers.governance import GOVERNANCE_HANDLERS
+from emergence_world.tools.handlers.memory import MEMORY_HANDLERS
+from emergence_world.tools.handlers.social import SOCIAL_HANDLERS
+from emergence_world.tools.handlers.pitches import PITCH_HANDLERS
 
 ToolHandler = Callable[[Session, str, dict[str, Any]], HandlerOutput]
 
@@ -23,7 +28,15 @@ class RegisteredTool:
 
 class ToolRegistry:
     def __init__(self, handlers: Mapping[str, ToolHandler] | None = None) -> None:
-        self._handlers = dict(CORE_HANDLERS if handlers is None else handlers)
+        defaults = {
+            **CORE_HANDLERS,
+            **ECONOMY_HANDLERS,
+            **SOCIAL_HANDLERS,
+            **MEMORY_HANDLERS,
+            **GOVERNANCE_HANDLERS,
+            **PITCH_HANDLERS,
+        }
+        self._handlers = dict(defaults if handlers is None else handlers)
 
     def get(self, session: Session, tool_name: str) -> RegisteredTool | None:
         definition = session.scalar(

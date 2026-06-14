@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,16 @@ from alembic.config import Config
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session, sessionmaker
 
-from emergence_world.db.models import Agent, AgentState, Landmark, ToolDefinition, World
+from emergence_world.db.models import (
+    Agent,
+    AgentState,
+    Landmark,
+    ToolDefinition,
+    World,
+    WorldEvent,
+)
 from emergence_world.db.session import (
     create_sync_database_engine,
     create_sync_session_factory,
@@ -21,7 +30,10 @@ from emergence_world.db.session import (
     sync_transaction,
 )
 from emergence_world.seed import import_seed_bundle, load_seed_bundle
+from emergence_world.metrics.awi import calculate_awi
 from emergence_world.tools import ManualToolExecutor
+from emergence_world.world.runtime import step_world
+from emergence_world.world.state import current_snapshot, replay_snapshot, snapshot_hash
 
 app = typer.Typer(name="world", no_args_is_help=True)
 console = Console()
@@ -33,14 +45,28 @@ def migrate_database(database: Path) -> None:
     command.upgrade(config, "head")
 
 
-def session_factory_for(database: Path):
+def session_factory_for(database: Path) -> sessionmaker[Session]:
     engine = create_sync_database_engine(sync_sqlite_url(database))
     return create_sync_session_factory(engine)
 
 
+def resolve_world_id(session: Session, world_name: str | None = None) -> str:
+    query = select(World)
+    if world_name is not None:
+        query = query.where(World.name == world_name)
+    worlds = session.scalars(query.order_by(World.name)).all()
+    if not worlds:
+        raise typer.BadParameter("no initialized world found")
+    if len(worlds) > 1:
+        raise typer.BadParameter("multiple worlds found; provide --world")
+    return str(worlds[0].id)
+
+
 @app.command("init")
 def init_world(
-    database: Path = typer.Option(Path("emergence_world.db"), help="SQLite database path."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
     random_seed: int = typer.Option(1, help="Recorded deterministic random seed."),
 ) -> None:
     """Migrate a database and import the versioned Season 1 seed bundle."""
@@ -48,7 +74,9 @@ def init_world(
     migrate_database(database)
     session_factory = session_factory_for(database)
     with sync_transaction(session_factory) as session:
-        result = import_seed_bundle(session, load_seed_bundle(), random_seed=random_seed)
+        result = import_seed_bundle(
+            session, load_seed_bundle(), random_seed=random_seed
+        )
     action = "created" if result.created else "already exists"
     console.print(
         f"World {action}: {result.world_id} "
@@ -59,7 +87,9 @@ def init_world(
 
 @app.command("status")
 def world_status(
-    database: Path = typer.Option(Path("emergence_world.db"), help="SQLite database path."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
 ) -> None:
     """Display initialized worlds and core record counts."""
 
@@ -69,7 +99,9 @@ def world_status(
         tools = session.scalar(select(func.count()).select_from(ToolDefinition)) or 0
         for world in session.scalars(select(World).order_by(World.name)):
             agents = session.scalar(
-                select(func.count()).select_from(Agent).where(Agent.world_id == world.id)
+                select(func.count())
+                .select_from(Agent)
+                .where(Agent.world_id == world.id)
             )
             landmarks = session.scalar(
                 select(func.count())
@@ -89,7 +121,9 @@ def world_status(
 @app.command("inspect-agent")
 def inspect_agent(
     name: str,
-    database: Path = typer.Option(Path("emergence_world.db"), help="SQLite database path."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
 ) -> None:
     """Display one seeded agent profile and current state."""
 
@@ -110,7 +144,9 @@ def inspect_agent(
         table.add_row("North Star Goal", agent.north_star_goal)
         table.add_row("Location", landmark.name)
         table.add_row("Status", state.status.value)
-        table.add_row("Needs", f"E={state.energy:g} K={state.knowledge:g} I={state.influence:g}")
+        table.add_row(
+            "Needs", f"E={state.energy:g} K={state.knowledge:g} I={state.influence:g}"
+        )
         table.add_row("ComputeCredits", str(state.cached_credit_balance))
     console.print(table)
 
@@ -118,7 +154,9 @@ def inspect_agent(
 @app.command("inspect-landmark")
 def inspect_landmark(
     name: str,
-    database: Path = typer.Option(Path("emergence_world.db"), help="SQLite database path."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
 ) -> None:
     """Display a landmark and its location-gated tools."""
 
@@ -133,14 +171,17 @@ def inspect_landmark(
         table.add_row("Description", landmark.description)
         table.add_row("Open", str(landmark.is_open))
         table.add_row(
-            "Gated Tools", ", ".join(landmark.metadata_json.get("gated_tools", [])) or "-"
+            "Gated Tools",
+            ", ".join(landmark.metadata_json.get("gated_tools", [])) or "-",
         )
     console.print(table)
 
 
 @app.command("list-tools")
 def list_tools(
-    database: Path = typer.Option(Path("emergence_world.db"), help="SQLite database path."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
 ) -> None:
     """List active versioned tools."""
 
@@ -160,7 +201,9 @@ def list_tools(
 @app.command("inspect-tool")
 def inspect_tool(
     name: str,
-    database: Path = typer.Option(Path("emergence_world.db"), help="SQLite database path."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
 ) -> None:
     """Display one tool definition and validation schema."""
 
@@ -177,7 +220,9 @@ def inspect_tool(
         table.add_row("Name", tool.name)
         table.add_row("Version", tool.version)
         table.add_row("Description", tool.description)
-        table.add_row("Argument Schema", json.dumps(tool.argument_schema, sort_keys=True))
+        table.add_row(
+            "Argument Schema", json.dumps(tool.argument_schema, sort_keys=True)
+        )
         table.add_row(
             "Locations",
             ", ".join(tool.availability_rules.get("locations", [])) or "global",
@@ -191,7 +236,9 @@ def call_tool(
     agent: str = typer.Argument(help="Agent name."),
     tool: str = typer.Argument(help="Tool name."),
     arguments: str = typer.Option("{}", "--arguments", "-a", help="JSON object."),
-    database: Path = typer.Option(Path("emergence_world.db"), help="SQLite database path."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
 ) -> None:
     """Execute one validated and audited manual tool call."""
 
@@ -209,6 +256,118 @@ def call_tool(
     else:
         console.print_json(data={"success": False, "error": result.error})
         raise typer.Exit(code=1)
+
+
+@app.command("step")
+def step(
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+    world: str | None = typer.Option(
+        None, help="World name when database has several."
+    ),
+    minutes: int = typer.Option(30, min=1, help="Simulated minutes advanced per turn."),
+) -> None:
+    """Schedule one deterministic turn and advance world mechanisms."""
+
+    session_factory = session_factory_for(database)
+    with sync_transaction(session_factory) as session:
+        result = step_world(session, resolve_world_id(session, world), minutes)
+    console.print_json(data=asdict(result))
+
+
+@app.command("run")
+def run(
+    turns: int = typer.Option(..., min=1, help="Number of deterministic turns."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+    world: str | None = typer.Option(
+        None, help="World name when database has several."
+    ),
+    minutes: int = typer.Option(30, min=1, help="Simulated minutes advanced per turn."),
+) -> None:
+    """Run a deterministic headless batch without an LLM."""
+
+    session_factory = session_factory_for(database)
+    last = None
+    completed = 0
+    with session_factory() as session:
+        world_id = resolve_world_id(session, world)
+    for _ in range(turns):
+        try:
+            with sync_transaction(session_factory) as session:
+                last = step_world(session, world_id, minutes)
+        except ValueError as exc:
+            if str(exc) != "world has no live agents":
+                raise
+            break
+        completed += 1
+    with session_factory() as session:
+        state_hash = snapshot_hash(current_snapshot(session, world_id))
+    console.print_json(
+        data={
+            "turns": completed,
+            "turns_requested": turns,
+            "last_agent": last.agent_name if last is not None else None,
+            "simulation_time": last.simulation_time if last is not None else None,
+            "state_hash": state_hash,
+        }
+    )
+
+
+@app.command("replay")
+def replay(
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+    world: str | None = typer.Option(
+        None, help="World name when database has several."
+    ),
+) -> None:
+    """Replay the event log and verify it matches current projections."""
+
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        world_id = resolve_world_id(session, world)
+        current_hash = snapshot_hash(current_snapshot(session, world_id))
+        replayed_hash = snapshot_hash(replay_snapshot(session, world_id))
+        event_count = (
+            session.scalar(
+                select(func.count())
+                .select_from(WorldEvent)
+                .where(WorldEvent.world_id == world_id)
+            )
+            or 0
+        )
+    matches = current_hash == replayed_hash
+    console.print_json(
+        data={
+            "matches": matches,
+            "events": event_count,
+            "current_hash": current_hash,
+            "replayed_hash": replayed_hash,
+        }
+    )
+    if not matches:
+        raise typer.Exit(code=1)
+
+
+@app.command("metrics")
+def metrics(
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+    world: str | None = typer.Option(
+        None, help="World name when database has several."
+    ),
+) -> None:
+    """Calculate observable AWI indicators and diagnostics."""
+
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        result = calculate_awi(session, resolve_world_id(session, world))
+    console.print_json(data=result)
 
 
 if __name__ == "__main__":

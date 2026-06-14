@@ -81,7 +81,11 @@ class ManualToolExecutor:
             tool_call.tool_version = registered.definition.version
             try:
                 with session.begin_nested():
-                    handler_arguments = {**arguments, "_agent_id": agent.id}
+                    handler_arguments = {
+                        **arguments,
+                        "_agent_id": agent.id,
+                        "_tool_call_id": tool_call.id,
+                    }
                     assert registered.handler is not None
                     output = registered.handler(
                         session, agent.world_id, handler_arguments
@@ -107,7 +111,7 @@ class ManualToolExecutor:
                                 ),
                             )
                         )
-                    session.flush()
+                        session.flush()
             except Exception as exc:
                 return self._fail(
                     turn,

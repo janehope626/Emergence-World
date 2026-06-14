@@ -29,6 +29,7 @@ from emergence_world.db.types import (
     ToolCallStatus,
     TurnStatus,
     TurnType,
+    ProposalStatus,
     WorldStatus,
 )
 
@@ -183,13 +184,13 @@ class AgentState(Base):
 class Turn(Base):
     __tablename__ = "turns"
     __table_args__ = (
-        UniqueConstraint(
-            "world_id", "sequence_number", name="uq_turns_world_sequence"
-        ),
+        UniqueConstraint("world_id", "sequence_number", name="uq_turns_world_sequence"),
         CheckConstraint("sequence_number >= 1", name="sequence_positive"),
         CheckConstraint("tool_call_budget >= 0", name="budget_nonnegative"),
         CheckConstraint("tool_calls_used >= 0", name="calls_used_nonnegative"),
-        CheckConstraint("tool_calls_used <= tool_call_budget", name="calls_within_budget"),
+        CheckConstraint(
+            "tool_calls_used <= tool_call_budget", name="calls_within_budget"
+        ),
         UniqueConstraint("world_id", "id", name="uq_turns_world_id_id"),
         ForeignKeyConstraint(
             ["world_id", "agent_id"],
@@ -219,6 +220,554 @@ class Turn(Base):
         DateTime(timezone=True), default=utc_now
     )
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BoostTurnRequest(Base):
+    __tablename__ = "boost_turn_requests"
+    __table_args__ = (
+        CheckConstraint("sequence_number >= 1", name="sequence_positive"),
+        UniqueConstraint("world_id", "sequence_number"),
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReactionRequest(Base):
+    __tablename__ = "reaction_requests"
+    __table_args__ = (
+        CheckConstraint("sequence_number >= 1", name="sequence_positive"),
+        UniqueConstraint("world_id", "sequence_number"),
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    source_event_id: Mapped[str] = mapped_column(ID)
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["world_id", "sender_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["world_id", "recipient_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    sender_id: Mapped[str] = mapped_column(ID, index=True)
+    recipient_id: Mapped[str] = mapped_column(ID, index=True)
+    content: Mapped[str] = mapped_column(Text)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class Proposal(Base):
+    __tablename__ = "proposals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["world_id", "proposer_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    proposer_id: Mapped[str] = mapped_column(ID, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(50), default="others")
+    status: Mapped[ProposalStatus] = mapped_column(
+        enum_type(ProposalStatus, "proposal_status"), default=ProposalStatus.ACTIVE
+    )
+    action_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProposalVote(Base):
+    __tablename__ = "proposal_votes"
+    __table_args__ = (
+        UniqueConstraint("proposal_id", "agent_id"),
+        CheckConstraint("choice IN ('for', 'against')", name="valid_choice"),
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    proposal_id: Mapped[str] = mapped_column(
+        ForeignKey("proposals.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    choice: Mapped[str] = mapped_column(String(10))
+    implicit: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class ProposalComment(Base):
+    __tablename__ = "proposal_comments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    proposal_id: Mapped[str] = mapped_column(
+        ForeignKey("proposals.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class PitchCycle(Base):
+    __tablename__ = "pitch_cycles"
+    __table_args__ = (UniqueConstraint("world_id", "sequence_number"),)
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    settled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Pitch(Base):
+    __tablename__ = "pitches"
+    __table_args__ = (
+        UniqueConstraint("cycle_id", "agent_id"),
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    cycle_id: Mapped[str] = mapped_column(
+        ForeignKey("pitch_cycles.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    evidence: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class PitchVote(Base):
+    __tablename__ = "pitch_votes"
+    __table_args__ = (
+        UniqueConstraint("cycle_id", "voter_id"),
+        ForeignKeyConstraint(
+            ["world_id", "voter_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    cycle_id: Mapped[str] = mapped_column(
+        ForeignKey("pitch_cycles.id", ondelete="CASCADE"), index=True
+    )
+    pitch_id: Mapped[str] = mapped_column(
+        ForeignKey("pitches.id", ondelete="CASCADE"), index=True
+    )
+    voter_id: Mapped[str] = mapped_column(ID, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class SoulEntry(Base):
+    __tablename__ = "soul_entries"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    current_content: Mapped[str] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class SoulEntryRevision(Base):
+    __tablename__ = "soul_entry_revisions"
+    __table_args__ = (
+        UniqueConstraint("soul_entry_id", "revision_number"),
+        CheckConstraint("revision_number >= 1", name="revision_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    soul_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("soul_entries.id", ondelete="RESTRICT"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    tool_call_id: Mapped[str] = mapped_column(
+        ForeignKey("tool_calls.id", ondelete="RESTRICT"), index=True
+    )
+    revision_number: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class EpisodicMemory(Base):
+    __tablename__ = "episodic_memories"
+    __table_args__ = (
+        CheckConstraint("importance >= 0 AND importance <= 1", name="importance_range"),
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    tool_call_id: Mapped[str] = mapped_column(
+        ForeignKey("tool_calls.id", ondelete="RESTRICT"), index=True
+    )
+    content: Mapped[str] = mapped_column(Text)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    tags_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class DiaryEntry(Base):
+    __tablename__ = "diary_entries"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "simulation_date"),
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    simulation_date: Mapped[str] = mapped_column(String(10))
+    current_content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class DiaryRevision(Base):
+    __tablename__ = "diary_revisions"
+    __table_args__ = (
+        UniqueConstraint("diary_entry_id", "revision_number"),
+        CheckConstraint("revision_number >= 1", name="revision_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    diary_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("diary_entries.id", ondelete="RESTRICT"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    tool_call_id: Mapped[str] = mapped_column(
+        ForeignKey("tool_calls.id", ondelete="RESTRICT"), index=True
+    )
+    revision_number: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    mood: Mapped[str | None] = mapped_column(String(200))
+    location: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class ConversationRecord(Base):
+    __tablename__ = "conversation_records"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["world_id", "owner_agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    owner_agent_id: Mapped[str] = mapped_column(ID, index=True)
+    speaker_id: Mapped[str] = mapped_column(ID, index=True)
+    target_agent_id: Mapped[str | None] = mapped_column(ID, index=True)
+    tool_call_id: Mapped[str] = mapped_column(
+        ForeignKey("tool_calls.id", ondelete="RESTRICT"), index=True
+    )
+    channel: Mapped[str] = mapped_column(String(50))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class Relationship(Base):
+    __tablename__ = "relationships"
+    __table_args__ = (
+        UniqueConstraint("observer_agent_id", "target_agent_id"),
+        CheckConstraint("observer_agent_id != target_agent_id", name="not_self"),
+        CheckConstraint("trust_score >= -1 AND trust_score <= 1", name="trust_range"),
+        CheckConstraint(
+            "affinity_score >= -1 AND affinity_score <= 1", name="affinity_range"
+        ),
+        CheckConstraint("interaction_count >= 0", name="interaction_nonnegative"),
+        ForeignKeyConstraint(
+            ["world_id", "observer_agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["world_id", "target_agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    observer_agent_id: Mapped[str] = mapped_column(ID, index=True)
+    target_agent_id: Mapped[str] = mapped_column(ID, index=True)
+    relationship_type: Mapped[str] = mapped_column(String(100))
+    rationale: Mapped[str] = mapped_column(Text)
+    trust_score: Mapped[float] = mapped_column(Float, default=0)
+    affinity_score: Mapped[float] = mapped_column(Float, default=0)
+    interaction_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class RelationshipRevision(Base):
+    __tablename__ = "relationship_revisions"
+    __table_args__ = (
+        UniqueConstraint("relationship_id", "revision_number"),
+        CheckConstraint("revision_number >= 1", name="revision_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    relationship_id: Mapped[str] = mapped_column(
+        ForeignKey("relationships.id", ondelete="RESTRICT"), index=True
+    )
+    observer_agent_id: Mapped[str] = mapped_column(ID, index=True)
+    target_agent_id: Mapped[str] = mapped_column(ID, index=True)
+    tool_call_id: Mapped[str] = mapped_column(
+        ForeignKey("tool_calls.id", ondelete="RESTRICT"), index=True
+    )
+    revision_number: Mapped[int] = mapped_column(Integer)
+    relationship_type: Mapped[str] = mapped_column(String(100))
+    rationale: Mapped[str] = mapped_column(Text)
+    trust_score: Mapped[float] = mapped_column(Float)
+    affinity_score: Mapped[float] = mapped_column(Float)
+    interaction_count: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class MemorySummary(Base):
+    __tablename__ = "memory_summaries"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    tool_call_id: Mapped[str] = mapped_column(
+        ForeignKey("tool_calls.id", ondelete="RESTRICT"), index=True
+    )
+    algorithm: Mapped[str] = mapped_column(String(100))
+    content: Mapped[str] = mapped_column(Text)
+    source_count: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class MemorySummarySource(Base):
+    __tablename__ = "memory_summary_sources"
+
+    summary_id: Mapped[str] = mapped_column(
+        ForeignKey("memory_summaries.id", ondelete="RESTRICT"), primary_key=True
+    )
+    memory_id: Mapped[str] = mapped_column(
+        ForeignKey("episodic_memories.id", ondelete="RESTRICT"), primary_key=True
+    )
+
+
+class ContextBuild(Base):
+    __tablename__ = "context_builds"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agents.world_id", "agents.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    query: Mapped[str] = mapped_column(Text, default="")
+    policy_version: Mapped[str] = mapped_column(String(100))
+    context_hash: Mapped[str] = mapped_column(String(64), index=True)
+    context_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class ContextMemoryCandidate(Base):
+    __tablename__ = "context_memory_candidates"
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    context_build_id: Mapped[str] = mapped_column(
+        ForeignKey("context_builds.id", ondelete="CASCADE"), index=True
+    )
+    world_id: Mapped[str] = mapped_column(ID, index=True)
+    agent_id: Mapped[str] = mapped_column(ID, index=True)
+    memory_kind: Mapped[str] = mapped_column(String(50))
+    source_id: Mapped[str] = mapped_column(ID, index=True)
+    score: Mapped[float] = mapped_column(Float)
+    exclusion_reason: Mapped[str | None] = mapped_column(String(200))
+
+
+class ContextMemorySelection(Base):
+    __tablename__ = "context_memory_selections"
+    __table_args__ = (
+        UniqueConstraint("context_build_id", "rank"),
+        CheckConstraint("rank >= 1", name="rank_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    context_build_id: Mapped[str] = mapped_column(
+        ForeignKey("context_builds.id", ondelete="CASCADE"), index=True
+    )
+    candidate_id: Mapped[str] = mapped_column(
+        ForeignKey("context_memory_candidates.id", ondelete="CASCADE"), unique=True
+    )
+    rank: Mapped[int] = mapped_column(Integer)
 
 
 class ToolDefinition(Base):

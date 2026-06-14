@@ -43,7 +43,7 @@ def test_seed_bundle_is_complete_and_explicit_about_assumptions() -> None:
 
     assert len(bundle.agents) == 10
     assert len(bundle.landmarks) == 35
-    assert len(bundle.tools) == 35
+    assert len(bundle.tools) == 38
     assert len(bundle.constitution) == 5
     assert bundle.documents[0].document_type == "agent_manifesto"
     assert len(bundle.world.reproduction_assumptions) >= 5
@@ -63,7 +63,7 @@ def test_seed_import_creates_complete_world_and_is_idempotent(tmp_path: Path) ->
     assert first.world_id == second.world_id
     assert first.agents == second.agents == 10
     assert first.landmarks == second.landmarks == 35
-    assert first.tools == second.tools == 35
+    assert first.tools == second.tools == 38
     assert first.constitution_articles == second.constitution_articles == 5
 
     with session_factory() as session:
@@ -71,12 +71,15 @@ def test_seed_import_creates_complete_world_and_is_idempotent(tmp_path: Path) ->
         assert session.scalar(select(func.count()).select_from(Agent)) == 10
         assert session.scalar(select(func.count()).select_from(AgentState)) == 10
         assert session.scalar(select(func.count()).select_from(Landmark)) == 35
-        assert session.scalar(select(func.count()).select_from(ToolDefinition)) == 35
+        assert session.scalar(select(func.count()).select_from(ToolDefinition)) == 38
         assert (
             session.scalar(select(func.count()).select_from(ConstitutionArticle)) == 5
         )
         assert session.scalar(select(func.count()).select_from(SeedDocument)) == 1
         assert session.scalar(select(func.count()).select_from(SimulationClock)) == 1
+        world = session.get(World, first.world_id)
+        assert world is not None
+        assert world.config_json["initial_state"]["location"] == "Central Plaza"
 
 
 def test_seed_import_preserves_tool_gates_and_provenance(tmp_path: Path) -> None:
@@ -120,9 +123,7 @@ def test_cli_initializes_and_inspects_seeded_world(tmp_path: Path) -> None:
 
     initialized = runner.invoke(app, ["init", "--database", str(database)])
     status = runner.invoke(app, ["status", "--database", str(database)])
-    agent = runner.invoke(
-        app, ["inspect-agent", "Anchor", "--database", str(database)]
-    )
+    agent = runner.invoke(app, ["inspect-agent", "Anchor", "--database", str(database)])
 
     assert initialized.exit_code == 0
     assert "10 agents" in initialized.stdout

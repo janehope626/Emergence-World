@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from hashlib import sha256
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from emergence_world.db.models import (
@@ -16,6 +18,7 @@ from emergence_world.db.models import (
     Landmark,
     SeedDocument,
     SimulationClock,
+    PitchCycle,
     ToolDefinition,
     World,
 )
@@ -53,7 +56,29 @@ def import_seed_bundle(
         )
     )
     if existing is not None:
+        if "initial_state" not in existing.config_json:
+            existing.config_json = {
+                **existing.config_json,
+                "initial_state": _initial_state(bundle),
+            }
         _upsert_tools(session, bundle)
+        if (
+            session.scalar(
+                select(PitchCycle).where(
+                    PitchCycle.world_id == existing.id,
+                    PitchCycle.settled.is_(False),
+                )
+            )
+            is None
+        ):
+            session.add(
+                PitchCycle(
+                    world_id=existing.id,
+                    sequence_number=1,
+                    starts_at=bundle.world.simulation_start,
+                    ends_at=bundle.world.simulation_start + timedelta(days=2),
+                )
+            )
         session.flush()
         return _result(session, existing, created=False)
 
@@ -78,6 +103,7 @@ def import_seed_bundle(
             "parameters": bundle.world.parameters,
             "reproduction_assumptions": list(bundle.world.reproduction_assumptions),
             "seed_version": bundle.seed_version,
+            "initial_state": _initial_state(bundle),
         },
     )
     session.add(world)
@@ -87,6 +113,14 @@ def import_seed_bundle(
             world_id=world.id,
             current_time=bundle.world.simulation_start,
             last_advanced_at=bundle.world.simulation_start,
+        )
+    )
+    session.add(
+        PitchCycle(
+            world_id=world.id,
+            sequence_number=1,
+            starts_at=bundle.world.simulation_start,
+            ends_at=bundle.world.simulation_start + timedelta(days=2),
         )
     )
 
@@ -162,6 +196,22 @@ def import_seed_bundle(
     return _result(session, world, created=True)
 
 
+def _initial_state(bundle: SeedBundle) -> dict[str, object]:
+    return {
+        "simulation_time": bundle.world.simulation_start.replace(
+            tzinfo=None
+        ).isoformat(),
+        "location": bundle.world.initial_location,
+        "energy": bundle.world.initial_energy,
+        "knowledge": bundle.world.initial_knowledge,
+        "influence": bundle.world.initial_influence,
+        "credits": bundle.world.initial_credits,
+        "mood": "neutral",
+        "status": "active",
+        "is_alive": True,
+    }
+
+
 def _upsert_tools(session: Session, bundle: SeedBundle) -> None:
     for tool_seed in bundle.tools:
         locations = sorted(
@@ -203,8 +253,15 @@ def _upsert_tools(session: Session, bundle: SeedBundle) -> None:
 
 
 def _result(session: Session, world: World, *, created: bool) -> SeedImportResult:
-    def count(model: type[object]) -> int:
-        return len(session.scalars(select(model).where(model.world_id == world.id)).all())  # type: ignore[attr-defined]
+    def count(model: Any) -> int:
+        return (
+            session.scalar(
+                select(func.count())
+                .select_from(model)
+                .where(model.world_id == world.id)
+            )
+            or 0
+        )
 
     tools = len(session.scalars(select(ToolDefinition)).all())
     return SeedImportResult(
