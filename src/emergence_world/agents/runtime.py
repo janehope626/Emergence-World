@@ -13,6 +13,12 @@ from emergence_world.agents.models import (
     ToolExecutionResult,
 )
 from emergence_world.agents.providers.base import AgentProvider
+from emergence_world.agents.providers.smoke import (
+    DEFAULT_PROVIDER_SMOKE_CONFIG,
+    ProviderFailure,
+    ProviderFailureCode,
+    ProviderSmokeConfig,
+)
 
 
 class ToolExecutor(Protocol):
@@ -35,6 +41,16 @@ class ProviderAuditor(Protocol):
         latency_ms: float,
     ) -> None: ...
 
+    def record_failure(
+        self,
+        *,
+        context: AgentContext,
+        tool_call_budget: int,
+        prior_results: tuple[ToolExecutionResult, ...],
+        failure: ProviderFailure,
+        latency_ms: float,
+    ) -> None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class AgentTurnRuntime:
@@ -49,13 +65,45 @@ class AgentTurnRuntime:
         tool_results: list[ToolExecutionResult] = []
         reasoning_log: list[str] = []
         reason: Literal["provider_done", "max_tool_calls_reached"]
+        provider_calls = 0
+        smoke_config = getattr(
+            self.provider, "smoke_config", DEFAULT_PROVIDER_SMOKE_CONFIG
+        )
+        if not isinstance(smoke_config, ProviderSmokeConfig):
+            smoke_config = DEFAULT_PROVIDER_SMOKE_CONFIG
 
         while len(tool_results) < tool_call_budget:
             remaining = tool_call_budget - len(tool_results)
             started = monotonic()
-            decision = await self.provider.decide(
-                context, remaining, tuple(tool_results)
-            )
+            provider_calls += 1
+            if provider_calls > smoke_config.max_provider_calls_per_turn:
+                failure = ProviderFailure(
+                    ProviderFailureCode.BUDGET_EXCEEDED,
+                    "provider-call budget exceeded",
+                )
+                if self.provider_auditor is not None:
+                    self.provider_auditor.record_failure(
+                        context=context,
+                        tool_call_budget=remaining,
+                        prior_results=tuple(tool_results),
+                        failure=failure,
+                        latency_ms=(monotonic() - started) * 1000,
+                    )
+                raise failure
+            try:
+                decision = await self.provider.decide(
+                    context, remaining, tuple(tool_results)
+                )
+            except ProviderFailure as failure:
+                if self.provider_auditor is not None:
+                    self.provider_auditor.record_failure(
+                        context=context,
+                        tool_call_budget=remaining,
+                        prior_results=tuple(tool_results),
+                        failure=failure,
+                        latency_ms=(monotonic() - started) * 1000,
+                    )
+                raise
             if self.provider_auditor is not None:
                 self.provider_auditor.record(
                     context=context,

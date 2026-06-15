@@ -22,7 +22,15 @@ from emergence_world.agents.models import (
     ToolExecutionResult,
 )
 from emergence_world.agents.providers.manual import ManualProvider
+from emergence_world.agents.providers.openai import OpenAIProvider, OpenAIProviderConfig
+from emergence_world.agents.providers.recording import (
+    RecordedProviderFailure,
+    RecordedProviderResponse,
+    RecordingProvider,
+)
 from emergence_world.agents.providers.scripted import ScriptedProvider
+from emergence_world.agents.providers.smoke import ProviderFailure, ProviderFailureCode
+from emergence_world.agents.providers.smoke import ProviderSmokeConfig
 from emergence_world.agents.runtime import AgentTurnRuntime
 
 
@@ -89,7 +97,11 @@ def make_context():
                 name="list_proposals",
                 version="1.0",
                 description="List",
-                argument_schema={"type": "object"},
+                argument_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
             ),
         ],
     )
@@ -180,3 +192,269 @@ def test_manual_provider_accepts_researcher_decision() -> None:
         return await provider.decide(context, 1)
 
     assert asyncio.run(scenario()) == decision
+
+
+def test_recording_provider_replays_saved_response_and_metadata() -> None:
+    _, context = make_context()
+    raw = {
+        "tool_calls": [
+            {
+                "call_id": "recorded-1",
+                "tool_name": "list_proposals",
+                "arguments": {},
+            }
+        ],
+        "terminate": True,
+    }
+    provider = RecordingProvider(
+        [
+            RecordedProviderResponse(
+                raw_response=raw,
+                input_tokens=100,
+                output_tokens=20,
+                total_tokens=120,
+                latency_ms=12.5,
+                cost_usd=0.01,
+            )
+        ]
+    )
+
+    decision = asyncio.run(provider.decide(context, 3))
+
+    assert decision.tool_calls[0].tool_name == "list_proposals"
+    assert provider.last_audit_metadata is not None
+    assert provider.last_audit_metadata.raw_response == raw
+    assert provider.last_audit_metadata.total_tokens == 120
+
+
+@pytest.mark.parametrize(
+    ("raw", "code"),
+    [
+        ("", ProviderFailureCode.EMPTY_RESPONSE),
+        ("not-json", ProviderFailureCode.INVALID_JSON),
+        (
+            {
+                "tool_calls": [
+                    {"call_id": "1", "tool_name": "unknown", "arguments": {}}
+                ]
+            },
+            ProviderFailureCode.UNKNOWN_TOOL,
+        ),
+        (
+            {
+                "tool_calls": [
+                    {
+                        "call_id": "1",
+                        "tool_name": "list_proposals",
+                        "arguments": {"unexpected": True},
+                    }
+                ]
+            },
+            ProviderFailureCode.INVALID_ARGUMENTS,
+        ),
+        (
+            {
+                "tool_calls": [
+                    {"call_id": "1", "tool_name": "list_proposals", "arguments": {}},
+                    {"call_id": "1", "tool_name": "list_proposals", "arguments": {}},
+                ]
+            },
+            ProviderFailureCode.DUPLICATE_CALL_ID,
+        ),
+    ],
+)
+def test_recording_provider_classifies_parse_failures(
+    raw: object, code: ProviderFailureCode
+) -> None:
+    _, context = make_context()
+    provider = RecordingProvider([raw])
+
+    with pytest.raises(ProviderFailure) as captured:
+        asyncio.run(provider.decide(context, 3))
+
+    assert captured.value.code == code
+    assert provider.last_audit_metadata is not None
+    assert provider.last_audit_metadata.parse_error.startswith(code.value)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        ProviderFailureCode.TIMEOUT,
+        ProviderFailureCode.RATE_LIMITED,
+        ProviderFailureCode.PROVIDER_ERROR,
+        ProviderFailureCode.BUDGET_EXCEEDED,
+    ],
+)
+def test_recording_provider_replays_operational_failures(
+    code: ProviderFailureCode,
+) -> None:
+    _, context = make_context()
+    provider = RecordingProvider([RecordedProviderFailure(code, "offline failure")])
+
+    with pytest.raises(ProviderFailure) as captured:
+        asyncio.run(provider.decide(context, 3))
+
+    assert captured.value.code == code
+    assert provider.last_audit_metadata is not None
+    assert provider.last_audit_metadata.parse_error == f"{code.value}: offline failure"
+
+
+class FakeResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        assert mode == "json"
+        return self.payload
+
+
+class FakeResponsesAPI:
+    def __init__(
+        self, response: FakeResponse | None = None, failure: Exception | None = None
+    ) -> None:
+        self.response = response
+        self.failure = failure
+        self.requests: list[dict[str, object]] = []
+
+    async def create(self, **kwargs: object) -> object:
+        self.requests.append(kwargs)
+        if self.failure is not None:
+            raise self.failure
+        assert self.response is not None
+        return self.response
+
+
+class FakeOpenAIClient:
+    def __init__(self, responses: FakeResponsesAPI) -> None:
+        self.responses = responses
+
+
+def openai_config(**updates: object) -> OpenAIProviderConfig:
+    config: dict[str, object] = {
+        "model": "mock-model",
+        "smoke_config": ProviderSmokeConfig(
+            max_turns=1,
+            max_provider_calls_per_turn=2,
+            max_tool_calls_per_turn=1,
+            max_input_tokens_per_request=1_000,
+            max_output_tokens_per_request=100,
+            max_total_cost_usd=0.01,
+            timeout_seconds=1,
+            max_retries=0,
+        ),
+        "input_cost_per_million_tokens_usd": 1.0,
+        "output_cost_per_million_tokens_usd": 2.0,
+    }
+    config.update(updates)
+    return OpenAIProviderConfig.model_validate(config)
+
+
+def test_openai_provider_builds_structured_request_and_parses_function_call(
+    monkeypatch,
+) -> None:
+    secret = "openai-request-secret"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    _, context = make_context()
+    responses = FakeResponsesAPI(
+        FakeResponse(
+            {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call-1",
+                        "name": "list_proposals",
+                        "arguments": "{}",
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120,
+                },
+            }
+        )
+    )
+    provider = OpenAIProvider(openai_config(), client=FakeOpenAIClient(responses))
+
+    decision = asyncio.run(provider.decide(context, 1))
+
+    assert decision.tool_calls[0].tool_name == "list_proposals"
+    assert responses.requests[0]["model"] == "mock-model"
+    assert responses.requests[0]["parallel_tool_calls"] is False
+    assert secret not in str(responses.requests[0])
+    assert provider.last_audit_metadata is not None
+    assert provider.last_audit_metadata.total_tokens == 120
+    assert provider.last_audit_metadata.cost_usd == pytest.approx(0.00014)
+
+
+def test_openai_provider_natural_language_cannot_change_state() -> None:
+    _, context = make_context()
+    responses = FakeResponsesAPI(
+        FakeResponse(
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "I moved to Town Hall.",
+                            }
+                        ],
+                    }
+                ],
+                "usage": {},
+            }
+        )
+    )
+    provider = OpenAIProvider(openai_config(), client=FakeOpenAIClient(responses))
+
+    decision = asyncio.run(provider.decide(context, 1))
+
+    assert decision.tool_calls == ()
+    assert decision.reasoning_text == "I moved to Town Hall."
+    assert decision.terminate is True
+
+
+def test_openai_provider_enforces_cost_budget_and_classifies_client_failure() -> None:
+    _, context = make_context()
+    costly = FakeResponsesAPI(
+        FakeResponse(
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "Done."}],
+                    }
+                ],
+                "usage": {"input_tokens": 1_000, "output_tokens": 100},
+            }
+        )
+    )
+    provider = OpenAIProvider(
+        openai_config(
+            smoke_config=ProviderSmokeConfig(
+                max_turns=1,
+                max_provider_calls_per_turn=1,
+                max_tool_calls_per_turn=1,
+                max_input_tokens_per_request=2_000,
+                max_output_tokens_per_request=200,
+                max_total_cost_usd=0.0001,
+                timeout_seconds=1,
+                max_retries=0,
+            )
+        ),
+        client=FakeOpenAIClient(costly),
+    )
+    with pytest.raises(ProviderFailure) as captured:
+        asyncio.run(provider.decide(context, 1))
+    assert captured.value.code == ProviderFailureCode.BUDGET_EXCEEDED
+
+    failed = OpenAIProvider(
+        openai_config(),
+        client=FakeOpenAIClient(FakeResponsesAPI(failure=RuntimeError("offline"))),
+    )
+    with pytest.raises(ProviderFailure) as captured:
+        asyncio.run(failed.decide(context, 1))
+    assert captured.value.code == ProviderFailureCode.PROVIDER_ERROR

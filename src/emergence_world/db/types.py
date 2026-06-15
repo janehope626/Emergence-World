@@ -12,6 +12,13 @@ class ExperimentStatus(StrEnum):
     FAILED = "failed"
 
 
+class ExperimentRunStatus(StrEnum):
+    CREATED = "created"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class WorldStatus(StrEnum):
     INITIALIZING = "initializing"
     READY = "ready"

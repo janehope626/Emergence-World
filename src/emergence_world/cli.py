@@ -7,6 +7,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import typer
 from alembic import command
@@ -19,8 +20,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from emergence_world.db.models import (
     Agent,
     AgentState,
+    Experiment,
+    ExperimentRun,
     Landmark,
     ProviderInteraction,
+    SimulationClock,
     ToolCall,
     ToolDefinition,
     Turn,
@@ -33,10 +37,17 @@ from emergence_world.db.session import (
     sync_sqlite_url,
     sync_transaction,
 )
+from emergence_world.db.base import utc_now
+from emergence_world.db.types import ExperimentRunStatus, TurnStatus
+from emergence_world.experiments import create_experiment_run
+from emergence_world.experiments.readiness import readiness_report
 from emergence_world.seed import import_seed_bundle, load_seed_bundle
 from emergence_world.metrics.awi import calculate_awi
 from emergence_world.agents.models import AgentDecision, RequestedToolCall
+from emergence_world.agents.providers.base import AgentProvider
+from emergence_world.agents.providers.openai import OpenAIProvider, OpenAIProviderConfig
 from emergence_world.agents.providers.scripted import ScriptedProvider
+from emergence_world.agents.providers.smoke import ProviderFailure, ProviderSmokeConfig
 from emergence_world.tools import ManualToolExecutor
 from emergence_world.world.runtime import autonomous_step_world, step_world
 from emergence_world.world.state import current_snapshot, replay_snapshot, snapshot_hash
@@ -339,14 +350,224 @@ def scripted_turn_provider(sequence: int) -> ScriptedProvider:
     )
 
 
+def scripted_provider_metadata(
+    smoke_config: ProviderSmokeConfig | None = None,
+) -> tuple[str, str, dict[str, Any]]:
+    effective_config = smoke_config or ProviderSmokeConfig()
+    return (
+        ScriptedProvider.provider_name,
+        ScriptedProvider.model_name,
+        {
+            "strategy": "go_to_central_plaza_then_terminate",
+            "smoke_config": effective_config.model_dump(mode="json"),
+        },
+    )
+
+
+def provider_smoke_config(
+    *,
+    turns: int,
+    max_provider_calls_per_turn: int,
+    max_tool_calls_per_turn: int,
+    max_input_tokens_per_request: int,
+    max_output_tokens_per_request: int,
+    max_total_cost_usd: float,
+    timeout_seconds: float,
+    max_retries: int,
+) -> ProviderSmokeConfig:
+    return ProviderSmokeConfig(
+        max_turns=turns,
+        max_provider_calls_per_turn=max_provider_calls_per_turn,
+        max_tool_calls_per_turn=max_tool_calls_per_turn,
+        max_input_tokens_per_request=max_input_tokens_per_request,
+        max_output_tokens_per_request=max_output_tokens_per_request,
+        max_total_cost_usd=max_total_cost_usd,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+    )
+
+
+def openai_provider_config(
+    *,
+    model: str | None,
+    smoke_config: ProviderSmokeConfig,
+    input_cost_per_million_tokens_usd: float | None,
+    output_cost_per_million_tokens_usd: float | None,
+) -> OpenAIProviderConfig:
+    if not model:
+        raise typer.BadParameter("--model is required for the openai provider")
+    if input_cost_per_million_tokens_usd is None:
+        raise typer.BadParameter(
+            "--input-cost-per-million-tokens-usd is required for the openai provider"
+        )
+    if output_cost_per_million_tokens_usd is None:
+        raise typer.BadParameter(
+            "--output-cost-per-million-tokens-usd is required for the openai provider"
+        )
+    return OpenAIProviderConfig(
+        model=model,
+        smoke_config=smoke_config,
+        input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
+        output_cost_per_million_tokens_usd=output_cost_per_million_tokens_usd,
+    )
+
+
+def experiment_run_view(run: ExperimentRun) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "run_id": run.run_id,
+        "experiment_id": run.experiment_id,
+        "world_id": run.world_id,
+        "git_commit": run.git_commit,
+        "seed_version": run.seed_version,
+        "seed_hash": run.seed_hash,
+        "config_hash": run.config_hash,
+        "random_seed": run.random_seed,
+        "initial_state_hash": run.initial_state_hash,
+        "context_builder_version": run.context_builder_version,
+        "retrieval_policy_version": run.retrieval_policy_version,
+        "prompt_template_version": run.prompt_template_version,
+        "prompt_hash": run.prompt_hash,
+        "tool_registry_hash": run.tool_registry_hash,
+        "provider_name": run.provider_name,
+        "provider_model": run.provider_model,
+        "provider_parameters_json": run.provider_parameters_json,
+        "simulation_minutes_per_turn": run.simulation_minutes_per_turn,
+        "max_turns": run.max_turns,
+        "database_path": run.database_path,
+        "dependency_lock_hash": run.dependency_lock_hash,
+        "environment_json": run.environment_json,
+        "status": run.status.value,
+        "started_at": run.started_at.isoformat(),
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+    }
+
+
+@app.command("create-run")
+def create_run(
+    run_id: str = typer.Option(..., help="Unique experiment run identifier."),
+    provider: str = typer.Option("scripted", help="Decision provider."),
+    turns: int = typer.Option(..., min=1, help="Maximum autonomous turns."),
+    random_seed: int = typer.Option(1, help="Recorded deterministic random seed."),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+    world: str | None = typer.Option(
+        None, help="World name when database has several."
+    ),
+    minutes: int = typer.Option(30, min=1, help="Simulated minutes per turn."),
+    mode: str = typer.Option(
+        "development", help="Experiment mode: development or formal."
+    ),
+    model: str | None = typer.Option(None, help="Provider model identifier."),
+    input_cost_per_million_tokens_usd: float | None = typer.Option(
+        None, min=0, help="Explicit input token price used for budget enforcement."
+    ),
+    output_cost_per_million_tokens_usd: float | None = typer.Option(
+        None, min=0, help="Explicit output token price used for budget enforcement."
+    ),
+) -> None:
+    """Create an immutable experiment run manifest without starting the run."""
+
+    if provider not in {"scripted", "openai"}:
+        raise typer.BadParameter("provider must be scripted or openai")
+    if mode not in {"development", "formal"}:
+        raise typer.BadParameter("mode must be development or formal")
+    migrate_database(database)
+    session_factory = session_factory_for(database)
+    if provider == "scripted":
+        smoke_config = ProviderSmokeConfig(max_turns=turns)
+        provider_name, provider_model, provider_parameters = scripted_provider_metadata(
+            smoke_config
+        )
+    else:
+        smoke_config = ProviderSmokeConfig(
+            max_turns=turns,
+            max_provider_calls_per_turn=2,
+            max_tool_calls_per_turn=1,
+            max_output_tokens_per_request=1_000,
+            max_total_cost_usd=0.25,
+            max_retries=1,
+        )
+        config = openai_provider_config(
+            model=model,
+            smoke_config=smoke_config,
+            input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
+            output_cost_per_million_tokens_usd=output_cost_per_million_tokens_usd,
+        )
+        provider_name, provider_model, provider_parameters = (
+            OpenAIProvider.provider_name,
+            config.model,
+            config.manifest_parameters(),
+        )
+    try:
+        with sync_transaction(session_factory) as session:
+            run = create_experiment_run(
+                session,
+                run_id=run_id,
+                world_id=resolve_world_id(session, world),
+                provider_name=provider_name,
+                provider_model=provider_model,
+                provider_parameters=provider_parameters,
+                random_seed=random_seed,
+                simulation_minutes_per_turn=minutes,
+                max_turns=turns,
+                database_path=database,
+                experiment_mode=mode,
+            )
+            output = experiment_run_view(run)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print_json(data=output)
+
+
+@app.command("inspect-run")
+def inspect_run(
+    run_id: str,
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+) -> None:
+    """Inspect one persisted experiment run manifest."""
+
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        run = session.scalar(select(ExperimentRun).where(ExperimentRun.run_id == run_id))
+        if run is None:
+            raise typer.BadParameter(f"unknown run: {run_id}")
+        output = experiment_run_view(run)
+    console.print_json(data=output)
+
+
 async def run_one_autonomous_turn(
     session_factory: sessionmaker[Session],
     world_id: str,
-    provider: ScriptedProvider,
+    provider: AgentProvider,
     minutes: int,
 ) -> Any:
-    with sync_transaction(session_factory) as session:
-        return await autonomous_step_world(session, world_id, provider, minutes)
+    session = session_factory()
+    try:
+        result = await autonomous_step_world(session, world_id, provider, minutes)
+        session.commit()
+        return result
+    except ProviderFailure as failure:
+        turn = session.scalar(
+            select(Turn)
+            .where(Turn.world_id == world_id, Turn.status == TurnStatus.RUNNING)
+            .order_by(Turn.sequence_number.desc())
+        )
+        clock = session.get(SimulationClock, world_id)
+        if turn is not None:
+            turn.status = TurnStatus.FAILED
+            turn.stop_reason = f"provider_failure:{failure.code.value}"
+            turn.ended_at = clock.current_time if clock is not None else utc_now()
+        session.commit()
+        raise
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 @app.command("run-autonomous")
@@ -360,35 +581,134 @@ def run_autonomous(
         None, help="World name when database has several."
     ),
     minutes: int = typer.Option(30, min=1, help="Simulated minutes advanced per turn."),
+    run_id: str | None = typer.Option(
+        None, help="Unique experiment run identifier; generated when omitted."
+    ),
+    random_seed: int | None = typer.Option(
+        None, help="Recorded random seed; defaults to the initialized experiment seed."
+    ),
+    mode: str = typer.Option(
+        "development", help="Experiment mode: development or formal."
+    ),
+    model: str | None = typer.Option(None, help="Provider model identifier."),
+    allow_external_provider: bool = typer.Option(
+        False,
+        "--allow-external-provider",
+        help="Explicitly permit requests to a real provider.",
+    ),
+    max_provider_calls_per_turn: int = typer.Option(2, min=1),
+    max_tool_calls_per_turn: int = typer.Option(1, min=1),
+    max_input_tokens_per_request: int = typer.Option(32_000, min=1),
+    max_output_tokens_per_request: int = typer.Option(1_000, min=1),
+    max_total_cost_usd: float = typer.Option(0.25, min=0),
+    timeout_seconds: float = typer.Option(60.0, min=0.1),
+    max_retries: int = typer.Option(1, min=0),
+    input_cost_per_million_tokens_usd: float | None = typer.Option(None, min=0),
+    output_cost_per_million_tokens_usd: float | None = typer.Option(None, min=0),
 ) -> None:
-    """Run audited autonomous turns using the deterministic scripted provider."""
+    """Run audited autonomous turns using an explicitly selected provider."""
 
-    if provider != "scripted":
-        raise typer.BadParameter("only the scripted provider is currently supported")
+    if provider not in {"scripted", "openai"}:
+        raise typer.BadParameter("provider must be scripted or openai")
+    if provider == "openai" and not allow_external_provider:
+        raise typer.BadParameter(
+            "openai provider requires explicit --allow-external-provider"
+        )
+    if mode not in {"development", "formal"}:
+        raise typer.BadParameter("mode must be development or formal")
+    migrate_database(database)
     session_factory = session_factory_for(database)
-    with session_factory() as session:
-        world_id = resolve_world_id(session, world)
+    smoke_config = provider_smoke_config(
+        turns=turns,
+        max_provider_calls_per_turn=max_provider_calls_per_turn,
+        max_tool_calls_per_turn=max_tool_calls_per_turn,
+        max_input_tokens_per_request=max_input_tokens_per_request,
+        max_output_tokens_per_request=max_output_tokens_per_request,
+        max_total_cost_usd=max_total_cost_usd,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+    )
+    real_provider: OpenAIProvider | None = None
+    if provider == "scripted":
+        provider_name, provider_model, provider_parameters = scripted_provider_metadata(
+            smoke_config
+        )
+    else:
+        config = openai_provider_config(
+            model=model,
+            smoke_config=smoke_config,
+            input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
+            output_cost_per_million_tokens_usd=output_cost_per_million_tokens_usd,
+        )
+        real_provider = OpenAIProvider(config)
+        provider_name, provider_model, provider_parameters = (
+            real_provider.provider_name,
+            real_provider.model_name,
+            real_provider.manifest_parameters(),
+        )
+    effective_run_id = run_id or f"autonomous-{uuid4()}"
+    try:
+        with sync_transaction(session_factory) as session:
+            world_id = resolve_world_id(session, world)
+            current_world = session.get(World, world_id)
+            assert current_world is not None
+            experiment = session.get(Experiment, current_world.experiment_id)
+            assert experiment is not None
+            effective_seed = (
+                random_seed if random_seed is not None else experiment.random_seed
+            )
+            created_run = create_experiment_run(
+                session,
+                run_id=effective_run_id,
+                world_id=world_id,
+                provider_name=provider_name,
+                provider_model=provider_model,
+                provider_parameters=provider_parameters,
+                random_seed=effective_seed,
+                simulation_minutes_per_turn=minutes,
+                max_turns=turns,
+                database_path=database,
+                status=ExperimentRunStatus.RUNNING,
+                experiment_mode=mode,
+            )
+            experiment_run_id = created_run.id
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     completed = 0
     last = None
-    for sequence in range(1, turns + 1):
-        try:
-            last = asyncio.run(
-                run_one_autonomous_turn(
-                    session_factory,
-                    world_id,
-                    scripted_turn_provider(sequence),
-                    minutes,
+    try:
+        for sequence in range(1, turns + 1):
+            try:
+                last = asyncio.run(
+                    run_one_autonomous_turn(
+                        session_factory,
+                        world_id,
+                        real_provider or scripted_turn_provider(sequence),
+                        minutes,
+                    )
                 )
-            )
-        except ValueError as exc:
-            if str(exc) != "world has no live agents":
-                raise
-            break
-        completed += 1
-    with session_factory() as session:
-        state_hash = snapshot_hash(current_snapshot(session, world_id))
+            except ValueError as exc:
+                if str(exc) != "world has no live agents":
+                    raise
+                break
+            completed += 1
+        with session_factory() as session:
+            state_hash = snapshot_hash(current_snapshot(session, world_id))
+        with sync_transaction(session_factory) as session:
+            completed_run = session.get(ExperimentRun, experiment_run_id)
+            assert completed_run is not None
+            completed_run.status = ExperimentRunStatus.COMPLETED
+            completed_run.completed_at = utc_now()
+    except Exception:
+        with sync_transaction(session_factory) as session:
+            failed_run = session.get(ExperimentRun, experiment_run_id)
+            assert failed_run is not None
+            failed_run.status = ExperimentRunStatus.FAILED
+            failed_run.completed_at = utc_now()
+        raise
     console.print_json(
         data={
+            "run_id": effective_run_id,
             "turns": completed,
             "turns_requested": turns,
             "last_turn_id": last.turn_id if last is not None else None,
@@ -397,6 +717,35 @@ def run_autonomous(
             "state_hash": state_hash,
         }
     )
+
+
+@app.command("readiness-check")
+def readiness_check(
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="Initialized SQLite database path."
+    ),
+    world: str | None = typer.Option(
+        None, help="World name when database has several."
+    ),
+    run_tests: bool = typer.Option(
+        True, "--run-tests/--skip-tests", help="Run the complete pytest suite."
+    ),
+) -> None:
+    """Evaluate the final gate before enabling a real provider."""
+
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        try:
+            world_id = resolve_world_id(session, world)
+        except typer.BadParameter:
+            world_id = None
+        report = readiness_report(
+            session,
+            database=database,
+            world_id=world_id,
+            run_tests=run_tests,
+        )
+    console.print_json(data=report)
 
 
 @app.command("inspect-turn")

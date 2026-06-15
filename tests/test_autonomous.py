@@ -7,10 +7,19 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+import pytest
 from sqlalchemy import func, select
 
 from emergence_world.agents.models import AgentDecision, RequestedToolCall
 from emergence_world.agents.providers.scripted import ScriptedProvider
+from emergence_world.agents.providers.recording import (
+    RecordedProviderFailure,
+    RecordingProvider,
+)
+from emergence_world.agents.providers.openai import OpenAIProvider, OpenAIProviderConfig
+from emergence_world.agents.providers.smoke import ProviderFailure, ProviderFailureCode
+from emergence_world.agents.providers.smoke import ProviderSmokeConfig
+from emergence_world.cli import run_one_autonomous_turn
 from emergence_world.db.models import (
     Agent,
     AgentState,
@@ -26,7 +35,7 @@ from emergence_world.db.session import (
     sync_sqlite_url,
     sync_transaction,
 )
-from emergence_world.db.types import AgentStatus, ToolCallStatus
+from emergence_world.db.types import AgentStatus, ToolCallStatus, TurnStatus
 from emergence_world.seed import import_seed_bundle, load_seed_bundle
 from emergence_world.world.runtime import autonomous_step_world
 from emergence_world.world.events import append_system_event
@@ -210,3 +219,139 @@ def test_autonomous_step_adds_world_events_and_provider_audit(tmp_path: Path) ->
         assert turn is not None and turn.context_hash
         assert turn.stop_reason == "provider_done"
         assert audit is not None and audit.raw_response_json is not None
+
+
+def test_recording_provider_parse_failure_is_audited_and_secrets_are_redacted(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    secret = "smoke-secret-must-not-persist"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    session_factory, world_id = initialized_world(tmp_path)
+    provider = RecordingProvider(
+        [
+            f'{{"reasoning_text":"{secret}"',
+        ]
+    )
+
+    with session_factory() as session, session.begin():
+        with pytest.raises(ProviderFailure) as captured:
+            asyncio.run(autonomous_step_world(session, world_id, provider))
+    assert captured.value.code == ProviderFailureCode.INVALID_JSON
+
+    with session_factory() as session:
+        audit = session.scalar(select(ProviderInteraction))
+        assert audit is not None
+        assert audit.parse_error is not None
+        assert audit.parse_error.startswith("invalid_json")
+        assert secret not in str(audit.request_json)
+        assert secret not in str(audit.raw_response_json)
+        assert secret not in str(audit.parse_error)
+        assert secret not in caplog.text
+
+
+def test_provider_failure_message_is_redacted_from_audit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    secret = "provider-error-secret"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    session_factory, world_id = initialized_world(tmp_path)
+    provider = RecordingProvider(
+        [
+            RecordedProviderFailure(
+                ProviderFailureCode.PROVIDER_ERROR,
+                f"upstream error included {secret}",
+                raw_response={"error": secret},
+            )
+        ]
+    )
+
+    with session_factory() as session, session.begin():
+        with pytest.raises(ProviderFailure):
+            asyncio.run(autonomous_step_world(session, world_id, provider))
+
+    with session_factory() as session:
+        audit = session.scalar(select(ProviderInteraction))
+        assert audit is not None
+        assert secret not in str(audit.raw_response_json)
+        assert secret not in str(audit.parse_error)
+
+
+def test_cli_turn_boundary_persists_provider_failure_audit(tmp_path: Path) -> None:
+    session_factory, world_id = initialized_world(tmp_path)
+    provider = RecordingProvider(
+        [RecordedProviderFailure(ProviderFailureCode.TIMEOUT, "offline timeout")]
+    )
+
+    with pytest.raises(ProviderFailure):
+        asyncio.run(run_one_autonomous_turn(session_factory, world_id, provider, 30))
+
+    with session_factory() as session:
+        turn = session.scalar(select(Turn))
+        audit = session.scalar(select(ProviderInteraction))
+        assert turn is not None
+        assert turn.status == TurnStatus.FAILED
+        assert turn.stop_reason == "provider_failure:timeout"
+        assert audit is not None
+        assert audit.parse_error == "timeout: offline timeout"
+
+
+def test_openai_provider_mock_response_is_fully_audited(
+    tmp_path: Path, monkeypatch
+) -> None:
+    secret = "openai-audit-secret"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    session_factory, world_id = initialized_world(tmp_path)
+
+    class Response:
+        def model_dump(self, *, mode: str):
+            assert mode == "json"
+            return {
+                "id": "response-1",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "Done."}],
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120,
+                },
+            }
+
+    class Responses:
+        async def create(self, **kwargs):
+            assert secret not in str(kwargs)
+            return Response()
+
+    class Client:
+        responses = Responses()
+
+    provider = OpenAIProvider(
+        OpenAIProviderConfig(
+            model="mock-model",
+            smoke_config=ProviderSmokeConfig(max_turns=1),
+            input_cost_per_million_tokens_usd=1,
+            output_cost_per_million_tokens_usd=2,
+        ),
+        client=Client(),
+    )
+
+    async def scenario():
+        with sync_transaction(session_factory) as session:
+            return await autonomous_step_world(session, world_id, provider)
+
+    result = asyncio.run(scenario())
+
+    with session_factory() as session:
+        audit = session.scalar(
+            select(ProviderInteraction).where(ProviderInteraction.turn_id == result.turn_id)
+        )
+        assert audit is not None
+        assert audit.provider == "openai"
+        assert audit.raw_response_json["id"] == "response-1"
+        assert audit.total_tokens == 120
+        assert audit.cost_usd == pytest.approx(0.00014)
+        assert secret not in str(audit.request_json)
+        assert secret not in str(audit.raw_response_json)

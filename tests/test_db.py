@@ -77,6 +77,7 @@ def test_alembic_upgrade_and_downgrade(tmp_path: Path) -> None:
 
     assert {
         "experiments",
+        "experiment_runs",
         "worlds",
         "constitution_articles",
         "seed_documents",
@@ -107,6 +108,7 @@ def test_alembic_upgrade_and_downgrade(tmp_path: Path) -> None:
     } <= tables
 
     engine.dispose()
+    command.check(config)
     command.downgrade(config, "base")
     engine = create_sync_database_engine(sync_sqlite_url(database_path))
     assert set(inspect(engine).get_table_names()) == {"alembic_version"}

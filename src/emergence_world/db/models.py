@@ -25,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from emergence_world.db.base import Base, new_id, utc_now
 from emergence_world.db.types import (
     AgentStatus,
+    ExperimentRunStatus,
     ExperimentStatus,
     ToolCallStatus,
     TurnStatus,
@@ -83,6 +84,46 @@ class World(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )
+
+
+class ExperimentRun(Base):
+    __tablename__ = "experiment_runs"
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    experiment_id: Mapped[str] = mapped_column(
+        ForeignKey("experiments.id", ondelete="CASCADE"), index=True
+    )
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    git_commit: Mapped[str | None] = mapped_column(String(64))
+    seed_version: Mapped[str | None] = mapped_column(String(100))
+    seed_hash: Mapped[str | None] = mapped_column(String(64))
+    config_hash: Mapped[str | None] = mapped_column(String(64))
+    random_seed: Mapped[int] = mapped_column(Integer)
+    initial_state_hash: Mapped[str | None] = mapped_column(String(64))
+    context_builder_version: Mapped[str | None] = mapped_column(String(100))
+    retrieval_policy_version: Mapped[str | None] = mapped_column(String(100))
+    prompt_template_version: Mapped[str | None] = mapped_column(String(100))
+    prompt_hash: Mapped[str | None] = mapped_column(String(64))
+    tool_registry_hash: Mapped[str | None] = mapped_column(String(64))
+    provider_name: Mapped[str] = mapped_column(String(100))
+    provider_model: Mapped[str | None] = mapped_column(String(200))
+    provider_parameters_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    simulation_minutes_per_turn: Mapped[int] = mapped_column(Integer)
+    max_turns: Mapped[int] = mapped_column(Integer)
+    database_path: Mapped[str | None] = mapped_column(Text)
+    dependency_lock_hash: Mapped[str | None] = mapped_column(String(64))
+    environment_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[ExperimentRunStatus] = mapped_column(
+        enum_type(ExperimentRunStatus, "experiment_run_status"),
+        default=ExperimentRunStatus.CREATED,
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SimulationClock(Base):
@@ -841,8 +882,12 @@ class SeedDocument(Base):
 class ConstitutionArticle(Base):
     __tablename__ = "constitution_articles"
     __table_args__ = (
-        UniqueConstraint("world_id", "position"),
-        UniqueConstraint("world_id", "title"),
+        UniqueConstraint(
+            "world_id", "position", name="uq_constitution_articles_world_position"
+        ),
+        UniqueConstraint(
+            "world_id", "title", name="uq_constitution_articles_world_title"
+        ),
         CheckConstraint("position >= 1", name="position_positive"),
     )
 
