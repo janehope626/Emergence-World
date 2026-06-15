@@ -76,7 +76,7 @@ def test_create_run_persists_manifest_and_inspect_displays_core_fields(
         assert run.prompt_template_version == "agent_turn_v1"
         assert run.prompt_hash
         assert run.provider_parameters_json["smoke_config"]["max_retries"] == 2
-        assert run.environment_json["git_dirty"] is True
+        assert isinstance(run.environment_json["git_dirty"], bool)
         assert isinstance(run.environment_json["dirty_files"], list)
         assert run.environment_json["git_branch"] == "main"
         assert run.environment_json["git_commit"]
@@ -274,10 +274,24 @@ def test_git_snapshot_records_clean_and_dirty_worktrees(tmp_path: Path) -> None:
 
 
 def test_formal_run_rejects_dirty_git_and_readiness_reports_gate(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch
 ) -> None:
     database, _, _ = initialized_database(tmp_path)
     runner = CliRunner()
+    dirty_snapshot = {
+        "git_dirty": True,
+        "dirty_files": ["test-dirty-file"],
+        "git_branch": "main",
+        "git_commit": "test-commit",
+    }
+    monkeypatch.setattr(
+        "emergence_world.experiments.manifest.git_snapshot",
+        lambda root: dirty_snapshot,
+    )
+    monkeypatch.setattr(
+        "emergence_world.experiments.readiness.git_snapshot",
+        lambda root: dirty_snapshot,
+    )
 
     formal = runner.invoke(
         app,
