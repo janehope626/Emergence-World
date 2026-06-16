@@ -22,6 +22,7 @@ from emergence_world.agents.models import (
     ToolExecutionResult,
 )
 from emergence_world.agents.providers.manual import ManualProvider
+from emergence_world.agents.providers.doubao import DoubaoProvider, DoubaoProviderConfig
 from emergence_world.agents.providers.openai import OpenAIProvider, OpenAIProviderConfig
 from emergence_world.agents.providers.recording import (
     RecordedProviderFailure,
@@ -350,6 +351,52 @@ def openai_config(**updates: object) -> OpenAIProviderConfig:
     return OpenAIProviderConfig.model_validate(config)
 
 
+class FakeChatCompletionsAPI:
+    def __init__(
+        self, response: FakeResponse | None = None, failure: Exception | None = None
+    ) -> None:
+        self.response = response
+        self.failure = failure
+        self.requests: list[dict[str, object]] = []
+
+    async def create(self, **kwargs: object) -> object:
+        self.requests.append(kwargs)
+        if self.failure is not None:
+            raise self.failure
+        assert self.response is not None
+        return self.response
+
+
+class FakeChatAPI:
+    def __init__(self, completions: FakeChatCompletionsAPI) -> None:
+        self.completions = completions
+
+
+class FakeDoubaoClient:
+    def __init__(self, completions: FakeChatCompletionsAPI) -> None:
+        self.chat = FakeChatAPI(completions)
+
+
+def doubao_config(**updates: object) -> DoubaoProviderConfig:
+    config: dict[str, object] = {
+        "model": "doubao-mock-endpoint",
+        "smoke_config": ProviderSmokeConfig(
+            max_turns=1,
+            max_provider_calls_per_turn=2,
+            max_tool_calls_per_turn=1,
+            max_input_tokens_per_request=1_000,
+            max_output_tokens_per_request=100,
+            max_total_cost_usd=0.01,
+            timeout_seconds=1,
+            max_retries=0,
+        ),
+        "input_cost_per_million_tokens_usd": 1.0,
+        "output_cost_per_million_tokens_usd": 2.0,
+    }
+    config.update(updates)
+    return DoubaoProviderConfig.model_validate(config)
+
+
 def test_openai_provider_builds_structured_request_and_parses_function_call(
     monkeypatch,
 ) -> None:
@@ -458,3 +505,104 @@ def test_openai_provider_enforces_cost_budget_and_classifies_client_failure() ->
     with pytest.raises(ProviderFailure) as captured:
         asyncio.run(failed.decide(context, 1))
     assert captured.value.code == ProviderFailureCode.PROVIDER_ERROR
+
+
+def test_doubao_provider_builds_chat_request_and_parses_tool_call() -> None:
+    _, context = make_context()
+    completions = FakeChatCompletionsAPI(
+        FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "list_proposals",
+                                        "arguments": "{}",
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                },
+            }
+        )
+    )
+    provider = DoubaoProvider(
+        doubao_config(), client=FakeDoubaoClient(completions)
+    )
+
+    decision = asyncio.run(provider.decide(context, 1))
+
+    assert decision.tool_calls[0].tool_name == "list_proposals"
+    assert completions.requests[0]["model"] == "doubao-mock-endpoint"
+    assert completions.requests[0]["parallel_tool_calls"] is False
+    tools = completions.requests[0]["tools"]
+    assert isinstance(tools, list)
+    assert tools[0]["type"] == "function"
+    assert "function" in tools[0]
+    assert provider.last_audit_metadata is not None
+    assert provider.last_audit_metadata.total_tokens == 120
+    assert provider.last_audit_metadata.cost_usd == pytest.approx(0.00014)
+
+
+def test_doubao_provider_natural_language_cannot_change_state() -> None:
+    _, context = make_context()
+    completions = FakeChatCompletionsAPI(
+        FakeResponse(
+            {
+                "choices": [
+                    {"message": {"content": "I moved to Town Hall.", "tool_calls": []}}
+                ],
+                "usage": {},
+            }
+        )
+    )
+    provider = DoubaoProvider(doubao_config(), client=FakeDoubaoClient(completions))
+
+    decision = asyncio.run(provider.decide(context, 1))
+
+    assert decision.tool_calls == ()
+    assert decision.reasoning_text == "I moved to Town Hall."
+    assert decision.terminate is True
+
+
+def test_doubao_provider_enforces_cost_budget_and_requires_api_key() -> None:
+    _, context = make_context()
+    costly = FakeChatCompletionsAPI(
+        FakeResponse(
+            {
+                "choices": [{"message": {"content": "Done."}}],
+                "usage": {"prompt_tokens": 1_000, "completion_tokens": 100},
+            }
+        )
+    )
+    provider = DoubaoProvider(
+        doubao_config(
+            smoke_config=ProviderSmokeConfig(
+                max_turns=1,
+                max_provider_calls_per_turn=1,
+                max_tool_calls_per_turn=1,
+                max_input_tokens_per_request=2_000,
+                max_output_tokens_per_request=200,
+                max_total_cost_usd=0.0001,
+                timeout_seconds=1,
+                max_retries=0,
+            )
+        ),
+        client=FakeDoubaoClient(costly),
+    )
+    with pytest.raises(ProviderFailure) as captured:
+        asyncio.run(provider.decide(context, 1))
+    assert captured.value.code == ProviderFailureCode.BUDGET_EXCEEDED
+
+    with pytest.raises(ValueError, match="ARK_API_KEY"):
+        DoubaoProvider(doubao_config(api_key_env="ARK_API_KEY_DOES_NOT_EXIST"))

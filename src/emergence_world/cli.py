@@ -45,6 +45,7 @@ from emergence_world.seed import import_seed_bundle, load_seed_bundle
 from emergence_world.metrics.awi import calculate_awi
 from emergence_world.agents.models import AgentDecision, RequestedToolCall
 from emergence_world.agents.providers.base import AgentProvider
+from emergence_world.agents.providers.doubao import DoubaoProvider, DoubaoProviderConfig
 from emergence_world.agents.providers.openai import OpenAIProvider, OpenAIProviderConfig
 from emergence_world.agents.providers.scripted import ScriptedProvider
 from emergence_world.agents.providers.smoke import ProviderFailure, ProviderSmokeConfig
@@ -412,6 +413,31 @@ def openai_provider_config(
     )
 
 
+def doubao_provider_config(
+    *,
+    model: str | None,
+    smoke_config: ProviderSmokeConfig,
+    input_cost_per_million_tokens_usd: float | None,
+    output_cost_per_million_tokens_usd: float | None,
+) -> DoubaoProviderConfig:
+    if not model:
+        raise typer.BadParameter("--model is required for the doubao provider")
+    if input_cost_per_million_tokens_usd is None:
+        raise typer.BadParameter(
+            "--input-cost-per-million-tokens-usd is required for the doubao provider"
+        )
+    if output_cost_per_million_tokens_usd is None:
+        raise typer.BadParameter(
+            "--output-cost-per-million-tokens-usd is required for the doubao provider"
+        )
+    return DoubaoProviderConfig(
+        model=model,
+        smoke_config=smoke_config,
+        input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
+        output_cost_per_million_tokens_usd=output_cost_per_million_tokens_usd,
+    )
+
+
 def experiment_run_view(run: ExperimentRun) -> dict[str, Any]:
     return {
         "id": run.id,
@@ -469,8 +495,8 @@ def create_run(
 ) -> None:
     """Create an immutable experiment run manifest without starting the run."""
 
-    if provider not in {"scripted", "openai"}:
-        raise typer.BadParameter("provider must be scripted or openai")
+    if provider not in {"scripted", "openai", "doubao"}:
+        raise typer.BadParameter("provider must be scripted, openai, or doubao")
     if mode not in {"development", "formal"}:
         raise typer.BadParameter("mode must be development or formal")
     migrate_database(database)
@@ -480,7 +506,7 @@ def create_run(
         provider_name, provider_model, provider_parameters = scripted_provider_metadata(
             smoke_config
         )
-    else:
+    elif provider == "openai":
         smoke_config = ProviderSmokeConfig(
             max_turns=turns,
             max_provider_calls_per_turn=2,
@@ -497,6 +523,26 @@ def create_run(
         )
         provider_name, provider_model, provider_parameters = (
             OpenAIProvider.provider_name,
+            config.model,
+            config.manifest_parameters(),
+        )
+    else:
+        smoke_config = ProviderSmokeConfig(
+            max_turns=turns,
+            max_provider_calls_per_turn=2,
+            max_tool_calls_per_turn=1,
+            max_output_tokens_per_request=1_000,
+            max_total_cost_usd=0.25,
+            max_retries=1,
+        )
+        config = doubao_provider_config(
+            model=model,
+            smoke_config=smoke_config,
+            input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
+            output_cost_per_million_tokens_usd=output_cost_per_million_tokens_usd,
+        )
+        provider_name, provider_model, provider_parameters = (
+            DoubaoProvider.provider_name,
             config.model,
             config.manifest_parameters(),
         )
@@ -608,11 +654,11 @@ def run_autonomous(
 ) -> None:
     """Run audited autonomous turns using an explicitly selected provider."""
 
-    if provider not in {"scripted", "openai"}:
-        raise typer.BadParameter("provider must be scripted or openai")
-    if provider == "openai" and not allow_external_provider:
+    if provider not in {"scripted", "openai", "doubao"}:
+        raise typer.BadParameter("provider must be scripted, openai, or doubao")
+    if provider in {"openai", "doubao"} and not allow_external_provider:
         raise typer.BadParameter(
-            "openai provider requires explicit --allow-external-provider"
+            f"{provider} provider requires explicit --allow-external-provider"
         )
     if mode not in {"development", "formal"}:
         raise typer.BadParameter("mode must be development or formal")
@@ -628,12 +674,12 @@ def run_autonomous(
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
     )
-    real_provider: OpenAIProvider | None = None
+    real_provider: AgentProvider | None = None
     if provider == "scripted":
         provider_name, provider_model, provider_parameters = scripted_provider_metadata(
             smoke_config
         )
-    else:
+    elif provider == "openai":
         config = openai_provider_config(
             model=model,
             smoke_config=smoke_config,
@@ -644,7 +690,23 @@ def run_autonomous(
         provider_name, provider_model, provider_parameters = (
             real_provider.provider_name,
             real_provider.model_name,
-            real_provider.manifest_parameters(),
+            config.manifest_parameters(),
+        )
+    else:
+        config = doubao_provider_config(
+            model=model,
+            smoke_config=smoke_config,
+            input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
+            output_cost_per_million_tokens_usd=output_cost_per_million_tokens_usd,
+        )
+        try:
+            real_provider = DoubaoProvider(config)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        provider_name, provider_model, provider_parameters = (
+            real_provider.provider_name,
+            real_provider.model_name,
+            config.manifest_parameters(),
         )
     effective_run_id = run_id or f"autonomous-{uuid4()}"
     try:

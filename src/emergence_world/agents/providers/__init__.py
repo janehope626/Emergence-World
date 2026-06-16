@@ -1,6 +1,7 @@
 """Provider-neutral and local decision providers."""
 
 from emergence_world.agents.providers.base import AgentProvider
+from emergence_world.agents.providers.doubao import DoubaoProvider, DoubaoProviderConfig
 from emergence_world.agents.providers.manual import ManualProvider
 from emergence_world.agents.providers.openai import OpenAIProvider, OpenAIProviderConfig
 from emergence_world.agents.providers.recording import (
@@ -13,6 +14,8 @@ from emergence_world.agents.providers.smoke import ProviderFailure, ProviderSmok
 
 __all__ = [
     "AgentProvider",
+    "DoubaoProvider",
+    "DoubaoProviderConfig",
     "ManualProvider",
     "OpenAIProvider",
     "OpenAIProviderConfig",
