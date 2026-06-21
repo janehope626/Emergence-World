@@ -37,6 +37,10 @@ AUDIT_TABLES = {
     "context_builds",
     "context_memory_candidates",
     "context_memory_selections",
+    "command_executions",
+    "execution_spans",
+    "state_diffs",
+    "trace_stream_events",
 }
 
 

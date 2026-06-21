@@ -105,6 +105,10 @@ def test_alembic_upgrade_and_downgrade(tmp_path: Path) -> None:
         "context_memory_candidates",
         "context_memory_selections",
         "provider_interactions",
+        "command_executions",
+        "execution_spans",
+        "state_diffs",
+        "trace_stream_events",
     } <= tables
 
     engine.dispose()

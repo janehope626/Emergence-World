@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from os import environ
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -20,11 +22,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from emergence_world.db.models import (
     Agent,
     AgentState,
+    CommandExecution,
+    ExecutionSpan,
     Experiment,
     ExperimentRun,
     Landmark,
     ProviderInteraction,
     SimulationClock,
+    StateDiff,
     ToolCall,
     ToolDefinition,
     Turn,
@@ -43,6 +48,11 @@ from emergence_world.experiments import create_experiment_run
 from emergence_world.experiments.readiness import readiness_report
 from emergence_world.seed import import_seed_bundle, load_seed_bundle
 from emergence_world.metrics.awi import calculate_awi
+from emergence_world.observability.query import (
+    delete_traces,
+    list_trace_summaries,
+    trace_prune_candidates,
+)
 from emergence_world.agents.models import AgentDecision, RequestedToolCall
 from emergence_world.agents.providers.base import AgentProvider
 from emergence_world.agents.providers.doubao import DoubaoProvider, DoubaoProviderConfig
@@ -55,6 +65,32 @@ from emergence_world.world.state import current_snapshot, replay_snapshot, snaps
 
 app = typer.Typer(name="world", no_args_is_help=True)
 console = Console()
+
+
+@app.command("serve")
+def serve(
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+    host: str = typer.Option("127.0.0.1", help="Bind address."),
+    port: int = typer.Option(8000, min=1, max=65535),
+    cors_origins: str = typer.Option(
+        "", help="Comma-separated browser origins; empty disables CORS."
+    ),
+) -> None:
+    """Run the single-worker REST and WebSocket observability service."""
+
+    import uvicorn
+
+    from emergence_world.api import create_app
+
+    origins = tuple(item.strip() for item in cors_origins.split(",") if item.strip())
+    api = create_app(
+        database,
+        payload_access_token=environ.get("EMERGENCE_TRACE_PAYLOAD_TOKEN"),
+        cors_origins=origins,
+    )
+    uvicorn.run(api, host=host, port=port, workers=1)
 
 
 def migrate_database(database: Path) -> None:
@@ -290,7 +326,12 @@ def step(
 
     session_factory = session_factory_for(database)
     with sync_transaction(session_factory) as session:
-        result = step_world(session, resolve_world_id(session, world), minutes)
+        result = step_world(
+            session,
+            resolve_world_id(session, world),
+            minutes,
+            command_name="step",
+        )
     console.print_json(data=asdict(result))
 
 
@@ -315,7 +356,7 @@ def run(
     for _ in range(turns):
         try:
             with sync_transaction(session_factory) as session:
-                last = step_world(session, world_id, minutes)
+                last = step_world(session, world_id, minutes, command_name="run")
         except ValueError as exc:
             if str(exc) != "world has no live agents":
                 raise
@@ -515,7 +556,7 @@ def create_run(
             max_total_cost_usd=0.25,
             max_retries=1,
         )
-        config = openai_provider_config(
+        openai_config = openai_provider_config(
             model=model,
             smoke_config=smoke_config,
             input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
@@ -523,8 +564,8 @@ def create_run(
         )
         provider_name, provider_model, provider_parameters = (
             OpenAIProvider.provider_name,
-            config.model,
-            config.manifest_parameters(),
+            openai_config.model,
+            openai_config.manifest_parameters(),
         )
     else:
         smoke_config = ProviderSmokeConfig(
@@ -535,7 +576,7 @@ def create_run(
             max_total_cost_usd=0.25,
             max_retries=1,
         )
-        config = doubao_provider_config(
+        doubao_config = doubao_provider_config(
             model=model,
             smoke_config=smoke_config,
             input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
@@ -543,8 +584,8 @@ def create_run(
         )
         provider_name, provider_model, provider_parameters = (
             DoubaoProvider.provider_name,
-            config.model,
-            config.manifest_parameters(),
+            doubao_config.model,
+            doubao_config.manifest_parameters(),
         )
     try:
         with sync_transaction(session_factory) as session:
@@ -593,7 +634,13 @@ async def run_one_autonomous_turn(
 ) -> Any:
     session = session_factory()
     try:
-        result = await autonomous_step_world(session, world_id, provider, minutes)
+        result = await autonomous_step_world(
+            session,
+            world_id,
+            provider,
+            minutes,
+            command_name="run-autonomous",
+        )
         session.commit()
         return result
     except ProviderFailure as failure:
@@ -680,33 +727,33 @@ def run_autonomous(
             smoke_config
         )
     elif provider == "openai":
-        config = openai_provider_config(
+        openai_config = openai_provider_config(
             model=model,
             smoke_config=smoke_config,
             input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
             output_cost_per_million_tokens_usd=output_cost_per_million_tokens_usd,
         )
-        real_provider = OpenAIProvider(config)
+        real_provider = OpenAIProvider(openai_config)
         provider_name, provider_model, provider_parameters = (
             real_provider.provider_name,
             real_provider.model_name,
-            config.manifest_parameters(),
+            openai_config.manifest_parameters(),
         )
     else:
-        config = doubao_provider_config(
+        doubao_config = doubao_provider_config(
             model=model,
             smoke_config=smoke_config,
             input_cost_per_million_tokens_usd=input_cost_per_million_tokens_usd,
             output_cost_per_million_tokens_usd=output_cost_per_million_tokens_usd,
         )
         try:
-            real_provider = DoubaoProvider(config)
+            real_provider = DoubaoProvider(doubao_config)
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
         provider_name, provider_model, provider_parameters = (
             real_provider.provider_name,
             real_provider.model_name,
-            config.manifest_parameters(),
+            doubao_config.manifest_parameters(),
         )
     effective_run_id = run_id or f"autonomous-{uuid4()}"
     try:
@@ -920,6 +967,297 @@ def inspect_provider_responses(
         )
 
 
+def parse_trace_datetime(value: str | None, option_name: str) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"{option_name} must be an ISO-8601 datetime"
+        ) from exc
+
+
+@app.command("list-traces")
+def list_traces(
+    world: str | None = typer.Option(None, help="Optional world name."),
+    stage: str | None = typer.Option(None, help="Require a span with this stage."),
+    status: str | None = typer.Option(None, help="Command status filter."),
+    started_from: str | None = typer.Option(None, "--from", help="ISO-8601 start."),
+    started_to: str | None = typer.Option(None, "--to", help="ISO-8601 end."),
+    offset: int = typer.Option(0, min=0),
+    limit: int = typer.Option(50, min=1, max=500),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+) -> None:
+    """List bounded trace summaries without loading recorded payloads."""
+
+    migrate_database(database)
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        world_id = resolve_world_id(session, world) if world is not None else None
+        items = list_trace_summaries(
+            session,
+            world_id=world_id,
+            stage=stage,
+            status=status,
+            started_from=parse_trace_datetime(started_from, "--from"),
+            started_to=parse_trace_datetime(started_to, "--to"),
+            offset=offset,
+            limit=limit,
+        )
+    console.print_json(data={"offset": offset, "limit": limit, "items": items})
+
+
+@app.command("inspect-trace")
+def inspect_trace(
+    command_id: str | None = typer.Option(None, "--command", help="Command identifier."),
+    turn_id: str | None = typer.Option(None, "--turn", help="Turn identifier."),
+    latest: bool = typer.Option(False, "--latest", help="Inspect the latest trace."),
+    stage: str | None = typer.Option(None, help="Span stage filter."),
+    status: str | None = typer.Option(None, help="Span status filter."),
+    offset: int = typer.Option(0, min=0, help="Span offset."),
+    limit: int = typer.Option(100, min=1, max=500, help="Maximum spans."),
+    related_offset: int = typer.Option(
+        0, min=0, help="Provider/tool/event/state-diff offset."
+    ),
+    related_limit: int = typer.Option(
+        100, min=1, max=500, help="Maximum items per related collection."
+    ),
+    include_payloads: bool = typer.Option(
+        False,
+        "--include-payloads",
+        help="Include potentially large inputs, outputs, and provider payloads.",
+    ),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+) -> None:
+    """Inspect a complete structured execution trace."""
+
+    selectors = sum((command_id is not None, turn_id is not None, latest))
+    if selectors > 1:
+        raise typer.BadParameter(
+            "provide only one of --command, --turn, or --latest"
+        )
+    migrate_database(database)
+    session_factory = session_factory_for(database)
+    with session_factory() as session:
+        if command_id is not None:
+            command_record = session.get(CommandExecution, command_id)
+            if command_record is None:
+                raise typer.BadParameter(f"no trace found for command: {command_id}")
+        elif turn_id is not None:
+            command_record = session.scalar(
+                select(CommandExecution)
+                .join(ExecutionSpan, ExecutionSpan.command_id == CommandExecution.id)
+                .where(ExecutionSpan.turn_id == turn_id)
+                .order_by(CommandExecution.started_at.desc())
+            )
+            if command_record is None:
+                raise typer.BadParameter(f"no trace found for turn: {turn_id}")
+        else:
+            command_record = session.scalar(
+                select(CommandExecution).order_by(CommandExecution.started_at.desc())
+            )
+            if command_record is None:
+                raise typer.BadParameter("no execution trace found")
+        span_query = select(ExecutionSpan).where(
+            ExecutionSpan.command_id == command_record.id
+        )
+        if stage is not None:
+            span_query = span_query.where(ExecutionSpan.stage == stage)
+        if status is not None:
+            span_query = span_query.where(ExecutionSpan.status == status)
+        spans = session.scalars(
+            span_query.order_by(ExecutionSpan.sequence_number)
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        all_command_spans = session.scalars(
+            select(ExecutionSpan)
+            .where(ExecutionSpan.command_id == command_record.id)
+            .order_by(ExecutionSpan.sequence_number)
+        ).all()
+        effective_turn_id = turn_id or next(
+            (span.turn_id for span in all_command_spans if span.turn_id is not None), None
+        )
+        diffs = session.scalars(
+            select(StateDiff)
+            .where(StateDiff.command_id == command_record.id)
+            .order_by(StateDiff.sequence_number)
+            .offset(related_offset)
+            .limit(related_limit)
+        ).all()
+        interactions = (
+            session.scalars(
+                select(ProviderInteraction)
+                .where(ProviderInteraction.turn_id == effective_turn_id)
+                .order_by(ProviderInteraction.sequence_number)
+                .offset(related_offset)
+                .limit(related_limit)
+            ).all()
+            if effective_turn_id is not None
+            else []
+        )
+        calls = (
+            session.scalars(
+                select(ToolCall)
+                .where(ToolCall.turn_id == effective_turn_id)
+                .order_by(ToolCall.sequence_number)
+                .offset(related_offset)
+                .limit(related_limit)
+            ).all()
+            if effective_turn_id is not None
+            else []
+        )
+        events = (
+            session.scalars(
+                select(WorldEvent)
+                .where(WorldEvent.turn_id == effective_turn_id)
+                .order_by(WorldEvent.sequence_number)
+                .offset(related_offset)
+                .limit(related_limit)
+            ).all()
+            if effective_turn_id is not None
+            else []
+        )
+        output = {
+            "command": {
+                "id": command_record.id,
+                "name": command_record.command_name,
+                "arguments": command_record.arguments_json,
+                "status": command_record.status,
+                "started_at": command_record.started_at.isoformat(),
+                "completed_at": (
+                    command_record.completed_at.isoformat()
+                    if command_record.completed_at is not None
+                    else None
+                ),
+                "error": command_record.error,
+            },
+            "turn_id": effective_turn_id,
+            "span_page": {"offset": offset, "limit": limit, "count": len(spans)},
+            "related_page": {
+                "offset": related_offset,
+                "limit": related_limit,
+                "provider_interaction_count": len(interactions),
+                "tool_call_count": len(calls),
+                "event_count": len(events),
+                "state_diff_count": len(diffs),
+            },
+            "spans": [
+                {
+                    "id": span.id,
+                    "parent_span_id": span.parent_span_id,
+                    "sequence_number": span.sequence_number,
+                    "stage": span.stage,
+                    "function_name": span.function_name,
+                    "source_file": span.source_file,
+                    "source_line": span.source_line,
+                    **(
+                        {"input": span.input_json, "output": span.output_json}
+                        if include_payloads
+                        else {}
+                    ),
+                    "status": span.status,
+                    "duration_ms": span.duration_ms,
+                    "error": span.error,
+                }
+                for span in spans
+            ],
+            "provider_interactions": [
+                {
+                    "provider": item.provider,
+                    "model": item.model_name,
+                    "tool_calls": item.parsed_tool_calls_json,
+                    "latency_ms": item.latency_ms,
+                    "cost_usd": item.cost_usd,
+                    **(
+                        {
+                            "request": item.request_json,
+                            "response": item.raw_response_json,
+                        }
+                        if include_payloads
+                        else {}
+                    ),
+                }
+                for item in interactions
+            ],
+            "tool_calls": [
+                {
+                    "tool_name": call.tool_name,
+                    "arguments": call.arguments_json,
+                    "status": call.status.value,
+                    "result": call.result_json,
+                    "error": call.error,
+                }
+                for call in calls
+            ],
+            "events": [
+                {
+                    "sequence_number": event.sequence_number,
+                    "event_type": event.event_type,
+                    "payload": event.payload_json,
+                }
+                for event in events
+            ],
+            "state_diffs": [
+                {
+                    "sequence_number": diff.sequence_number,
+                    "entity_type": diff.entity_type,
+                    "entity_id": diff.entity_id,
+                    "path": diff.path,
+                    "before": diff.before_json,
+                    "after": diff.after_json,
+                }
+                for diff in diffs
+            ],
+        }
+    console.print_json(data=output)
+
+
+@app.command("prune-traces")
+def prune_traces(
+    older_than_days: int = typer.Option(30, min=0),
+    keep_latest: int = typer.Option(100, min=0),
+    world: str | None = typer.Option(None, help="Optional world name."),
+    execute: bool = typer.Option(
+        False, "--execute", help="Delete candidates; default is a dry run."
+    ),
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+) -> None:
+    """Apply the bounded trace-retention policy, dry-running by default."""
+
+    migrate_database(database)
+    session_factory = session_factory_for(database)
+    with sync_transaction(session_factory) as session:
+        world_id = resolve_world_id(session, world) if world is not None else None
+        candidates = trace_prune_candidates(
+            session,
+            older_than_days=older_than_days,
+            keep_latest=keep_latest,
+            world_id=world_id,
+        )
+        deleted = delete_traces(session, candidates) if execute else 0
+    console.print_json(
+        data={
+            "policy": {
+                "older_than_days": older_than_days,
+                "keep_latest": keep_latest,
+                "world": world,
+            },
+            "dry_run": not execute,
+            "candidate_count": len(candidates),
+            "candidate_command_ids": candidates,
+            "deleted_count": deleted,
+        }
+    )
+
+
 @app.command("replay")
 def replay(
     database: Path = typer.Option(
@@ -931,6 +1269,7 @@ def replay(
 ) -> None:
     """Replay the event log and verify it matches current projections."""
 
+    migrate_database(database)
     session_factory = session_factory_for(database)
     with session_factory() as session:
         world_id = resolve_world_id(session, world)

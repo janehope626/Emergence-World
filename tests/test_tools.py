@@ -88,6 +88,25 @@ def test_go_to_place_updates_location_and_records_event(tmp_path: Path) -> None:
         assert event.payload_json["to"] == "Town Hall"
 
 
+def test_go_to_current_place_is_successful_noop_without_event(tmp_path: Path) -> None:
+    session_factory, _ = initialized_runtime(tmp_path)
+
+    result = ManualToolExecutor(session_factory).call(
+        agent_name="Anchor",
+        tool_name="go_to_place",
+        arguments={"place": "Central Plaza"},
+    )
+
+    assert result.success is True
+    assert result.result == {
+        "from": "Central Plaza",
+        "to": "Central Plaza",
+        "moved": False,
+    }
+    assert anchor_location(session_factory) == "Central Plaza"
+    assert event_count(session_factory) == 0
+
+
 def test_gated_tool_is_rejected_at_wrong_location_without_event(tmp_path: Path) -> None:
     session_factory, _ = initialized_runtime(tmp_path)
     executor = ManualToolExecutor(session_factory)

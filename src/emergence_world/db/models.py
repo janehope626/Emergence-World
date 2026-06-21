@@ -988,6 +988,133 @@ class WorldEvent(Base):
     )
 
 
+class CommandExecution(Base):
+    """One externally initiated or runtime-level world operation."""
+
+    __tablename__ = "command_executions"
+    __table_args__ = (
+        Index("ix_command_executions_started_at", "started_at"),
+        Index(
+            "ix_command_executions_world_started",
+            "world_id",
+            "started_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    command_name: Mapped[str] = mapped_column(String(200), index=True)
+    arguments_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(30), default="running", index=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class ExecutionSpan(Base):
+    """A structured, nested business-boundary execution trace."""
+
+    __tablename__ = "execution_spans"
+    __table_args__ = (
+        UniqueConstraint("command_id", "sequence_number"),
+        CheckConstraint("sequence_number >= 1", name="execution_span_sequence_positive"),
+        Index(
+            "ix_execution_spans_command_stage_status_sequence",
+            "command_id",
+            "stage",
+            "status",
+            "sequence_number",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    command_id: Mapped[str] = mapped_column(
+        ForeignKey("command_executions.id", ondelete="CASCADE"), index=True
+    )
+    turn_id: Mapped[str | None] = mapped_column(
+        ForeignKey("turns.id", ondelete="SET NULL"), index=True
+    )
+    parent_span_id: Mapped[str | None] = mapped_column(
+        ForeignKey("execution_spans.id", ondelete="SET NULL"), index=True
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    stage: Mapped[str] = mapped_column(String(50), index=True)
+    function_name: Mapped[str] = mapped_column(String(500))
+    source_file: Mapped[str | None] = mapped_column(Text)
+    source_line: Mapped[int | None] = mapped_column(Integer)
+    input_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(30), default="running", index=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[float | None] = mapped_column(Float)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class StateDiff(Base):
+    """One stable leaf-level difference between turn snapshots."""
+
+    __tablename__ = "state_diffs"
+    __table_args__ = (
+        UniqueConstraint("command_id", "sequence_number"),
+        CheckConstraint("sequence_number >= 1", name="state_diff_sequence_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True, default=new_id)
+    command_id: Mapped[str] = mapped_column(
+        ForeignKey("command_executions.id", ondelete="CASCADE"), index=True
+    )
+    turn_id: Mapped[str | None] = mapped_column(
+        ForeignKey("turns.id", ondelete="SET NULL"), index=True
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    entity_type: Mapped[str] = mapped_column(String(100), index=True)
+    entity_id: Mapped[str] = mapped_column(String(200), index=True)
+    path: Mapped[str] = mapped_column(Text)
+    before_json: Mapped[Any | None] = mapped_column(JSON)
+    after_json: Mapped[Any | None] = mapped_column(JSON)
+
+
+class TraceStreamEvent(Base):
+    """Committed lightweight outbox event for cross-process trace streaming."""
+
+    __tablename__ = "trace_stream_events"
+    __table_args__ = (
+        Index("ix_trace_stream_events_world_sequence", "world_id", "stream_sequence"),
+        Index(
+            "ix_trace_stream_events_command_sequence",
+            "command_id",
+            "stream_sequence",
+        ),
+    )
+
+    stream_sequence: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    event_id: Mapped[str] = mapped_column(ID, unique=True, index=True)
+    command_id: Mapped[str] = mapped_column(
+        ForeignKey("command_executions.id", ondelete="CASCADE"), index=True
+    )
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    turn_id: Mapped[str | None] = mapped_column(
+        ForeignKey("turns.id", ondelete="SET NULL"), index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    span_sequence: Mapped[int | None] = mapped_column(Integer)
+    data_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+
+
 class CreditLedgerEntry(Base):
     __tablename__ = "credit_ledger_entries"
     __table_args__ = (

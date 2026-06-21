@@ -10,6 +10,7 @@ from emergence_world.db.models import Agent, AgentState, Landmark, ToolCall, Tur
 from emergence_world.db.types import ToolCallStatus
 from emergence_world.tools.executor import ManualToolExecutor, ToolValidationError
 from emergence_world.tools.registry import ToolRegistry
+from emergence_world.observability import emit_trace_event, traced_span
 
 
 class AutonomousToolExecutor:
@@ -46,17 +47,53 @@ class AutonomousToolExecutor:
         )
         self._session.add(record)
         self._session.flush()
-        registered = self._registry.get(self._session, tool_call.tool_name)
+        with traced_span(
+            stage="tool_validation",
+            function=ManualToolExecutor._validate,
+            input={
+                "agent_id": agent.id,
+                "tool_name": tool_call.tool_name,
+                "arguments": tool_call.arguments,
+                "location": landmark.name if landmark else None,
+            },
+            turn_id=self._turn.id,
+        ) as validation_span:
+            try:
+                ManualToolExecutor._validate(
+                    self._registry.get(self._session, tool_call.tool_name),
+                    state,
+                    landmark,
+                    tool_call.arguments,
+                )
+            except ToolValidationError as exc:
+                if validation_span is not None:
+                    validation_span.set_output({"valid": False, "error": str(exc)})
+                    validation_span.set_failed(str(exc))
+                return self._fail(
+                    record, tool_call, ToolCallStatus.VALIDATION_FAILED, str(exc)
+                )
+            registered = self._registry.get(self._session, tool_call.tool_name)
+            if validation_span is not None:
+                validation_span.set_output({"valid": True})
         try:
-            ManualToolExecutor._validate(registered, state, landmark, tool_call.arguments)
-        except ToolValidationError as exc:
-            return self._fail(record, tool_call, ToolCallStatus.VALIDATION_FAILED, str(exc))
+            assert registered is not None and registered.handler is not None
+        except AssertionError:
+            return self._fail(
+                record,
+                tool_call,
+                ToolCallStatus.VALIDATION_FAILED,
+                "tool handler is not implemented",
+            )
 
-        assert registered is not None and registered.handler is not None
         record.tool_definition_id = registered.definition.id
         record.tool_version = registered.definition.version
         try:
-            with self._session.begin_nested():
+            with self._session.begin_nested(), traced_span(
+                stage="tool_handler",
+                function=registered.handler,
+                input={"tool_name": tool_call.tool_name, "arguments": tool_call.arguments},
+                turn_id=self._turn.id,
+            ) as handler_span:
                 output = registered.handler(
                     self._session,
                     self._turn.world_id,
@@ -71,23 +108,44 @@ class AutonomousToolExecutor:
                     output.events,
                     registered.definition.produced_event_types,
                 )
-                for pending in output.events:
-                    self._session.add(
-                        WorldEvent(
-                            world_id=self._turn.world_id,
-                            turn_id=self._turn.id,
-                            tool_call_id=record.id,
-                            sequence_number=ManualToolExecutor._next_event_sequence(
-                                self._session, self._turn.world_id
-                            ),
-                            event_type=pending.event_type,
-                            payload_json=pending.payload,
-                            simulation_time=ManualToolExecutor._simulation_time(
-                                self._session, self._turn.world_id
-                            ),
-                        )
+                if handler_span is not None:
+                    handler_span.set_output(
+                        {
+                            "result": output.result,
+                            "event_types": [event.event_type for event in output.events],
+                        }
                     )
-                    self._session.flush()
+                with traced_span(
+                    stage="event",
+                    function="persist_world_events",
+                    input={"event_count": len(output.events)},
+                    turn_id=self._turn.id,
+                ) as event_span:
+                    for pending in output.events:
+                        self._session.add(
+                            WorldEvent(
+                                world_id=self._turn.world_id,
+                                turn_id=self._turn.id,
+                                tool_call_id=record.id,
+                                sequence_number=ManualToolExecutor._next_event_sequence(
+                                    self._session, self._turn.world_id
+                                ),
+                                event_type=pending.event_type,
+                                payload_json=pending.payload,
+                                simulation_time=ManualToolExecutor._simulation_time(
+                                    self._session, self._turn.world_id
+                                ),
+                            )
+                        )
+                        self._session.flush()
+                    if event_span is not None:
+                        event_span.set_output(
+                            {"event_types": [event.event_type for event in output.events]}
+                        )
+        except ToolValidationError as exc:
+            return self._fail(
+                record, tool_call, ToolCallStatus.EXECUTION_FAILED, str(exc)
+            )
         except Exception as exc:
             return self._fail(
                 record, tool_call, ToolCallStatus.EXECUTION_FAILED, str(exc)
@@ -99,6 +157,17 @@ class AutonomousToolExecutor:
             self._session, self._turn.world_id
         )
         self._turn.tool_calls_used = sequence
+        emit_trace_event(
+            "tool.completed",
+            turn_id=self._turn.id,
+            sequence=sequence,
+            data={
+                "tool_call_id": record.id,
+                "tool_name": tool_call.tool_name,
+                "status": record.status.value,
+                "success": True,
+            },
+        )
         return ToolExecutionResult(
             call_id=tool_call.call_id,
             tool_name=tool_call.tool_name,
@@ -131,6 +200,18 @@ class AutonomousToolExecutor:
             self._session, self._turn.world_id
         )
         self._turn.tool_calls_used = record.sequence_number
+        emit_trace_event(
+            "tool.completed",
+            turn_id=self._turn.id,
+            sequence=record.sequence_number,
+            data={
+                "tool_call_id": record.id,
+                "tool_name": requested.tool_name,
+                "status": status.value,
+                "success": False,
+                "error": error,
+            },
+        )
         return ToolExecutionResult(
             call_id=requested.call_id,
             tool_name=requested.tool_name,

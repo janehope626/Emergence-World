@@ -19,6 +19,7 @@ from emergence_world.agents.providers.smoke import (
     ProviderFailureCode,
     ProviderSmokeConfig,
 )
+from emergence_world.observability import traced_span
 
 
 class ToolExecutor(Protocol):
@@ -91,9 +92,27 @@ class AgentTurnRuntime:
                     )
                 raise failure
             try:
-                decision = await self.provider.decide(
-                    context, remaining, tuple(tool_results)
-                )
+                with traced_span(
+                    stage="provider",
+                    function=self.provider.decide,
+                    input={
+                        "provider": self.provider.provider_name,
+                        "model": self.provider.model_name,
+                        "remaining_tool_budget": remaining,
+                        "prior_results": tool_results,
+                    },
+                ) as span:
+                    decision = await self.provider.decide(
+                        context, remaining, tuple(tool_results)
+                    )
+                    if span is not None:
+                        span.set_output(
+                            {
+                                "reasoning_text": decision.reasoning_text,
+                                "tool_calls": decision.tool_calls,
+                                "terminate": decision.terminate,
+                            }
+                        )
             except ProviderFailure as failure:
                 if self.provider_auditor is not None:
                     self.provider_auditor.record_failure(

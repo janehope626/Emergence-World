@@ -22,6 +22,13 @@ from emergence_world.db.models import (
 )
 from emergence_world.db.types import ToolCallStatus, TurnStatus, TurnType
 from emergence_world.tools.registry import ToolRegistry
+from emergence_world.observability import (
+    TraceRecorder,
+    diff_snapshots,
+    emit_trace_event,
+    traced_span,
+)
+from emergence_world.world.state import current_snapshot
 
 
 class ToolValidationError(ValueError):
@@ -50,51 +57,133 @@ class ManualToolExecutor:
             agent, state, landmark = self._resolve_agent(
                 session, agent_name=agent_name, world_id=world_id
             )
-            turn = self._create_turn(session, agent)
-            tool_call = ToolCall(
+            before = current_snapshot(session, agent.world_id)
+            with TraceRecorder(
+                session,
                 world_id=agent.world_id,
-                turn_id=turn.id,
-                agent_id=agent.id,
-                sequence_number=1,
-                tool_name=tool_name,
-                tool_version="unknown",
-                arguments_json=arguments,
-                status=ToolCallStatus.REQUESTED,
-            )
-            session.add(tool_call)
-            session.flush()
+                command_name="call-tool",
+                arguments={
+                    "agent_name": agent_name,
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                },
+            ) as trace:
+                result, turn_id = self._call_in_session(
+                    session=session,
+                    agent=agent,
+                    state=state,
+                    landmark=landmark,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+                if not result.success:
+                    trace.mark_failed(result.error or "tool call failed")
+                trace.bind_turn(turn_id)
+                with trace.span(
+                    stage="state_diff",
+                    function=diff_snapshots,
+                    input={},
+                    turn_id=turn_id,
+                ) as span:
+                    changes = diff_snapshots(
+                        before, current_snapshot(session, agent.world_id)
+                    )
+                    trace.record_diffs(changes, turn_id=turn_id)
+                    span.set_output({"change_count": len(changes)})
+                return result
 
-            registered = self._registry.get(session, tool_name)
+    def _call_in_session(
+        self,
+        *,
+        session: Session,
+        agent: Agent,
+        state: AgentState,
+        landmark: Landmark | None,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> tuple[ToolExecutionResult, str]:
+        turn = self._create_turn(session, agent)
+        tool_call = ToolCall(
+            world_id=agent.world_id,
+            turn_id=turn.id,
+            agent_id=agent.id,
+            sequence_number=1,
+            tool_name=tool_name,
+            tool_version="unknown",
+            arguments_json=arguments,
+            status=ToolCallStatus.REQUESTED,
+        )
+        session.add(tool_call)
+        session.flush()
+
+        registered = self._registry.get(session, tool_name)
+        with traced_span(
+            stage="tool_validation",
+            function=self._validate,
+            input={
+                "agent_id": agent.id,
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "location": landmark.name if landmark else None,
+            },
+            turn_id=turn.id,
+        ) as span:
             try:
                 self._validate(registered, state, landmark, arguments)
             except ToolValidationError as exc:
-                return self._fail(
-                    turn,
-                    tool_call,
-                    ToolCallStatus.VALIDATION_FAILED,
-                    str(exc),
-                    self._simulation_time(session, agent.world_id),
+                if span is not None:
+                    span.set_output({"valid": False, "error": str(exc)})
+                    span.set_failed(str(exc))
+                return (
+                    self._fail(
+                        turn,
+                        tool_call,
+                        ToolCallStatus.VALIDATION_FAILED,
+                        str(exc),
+                        self._simulation_time(session, agent.world_id),
+                    ),
+                    turn.id,
                 )
+            if span is not None:
+                span.set_output({"valid": True})
 
-            assert registered is not None
-            tool_call.tool_definition_id = registered.definition.id
-            tool_call.tool_version = registered.definition.version
-            try:
-                with session.begin_nested():
-                    handler_arguments = {
+        assert registered is not None and registered.handler is not None
+        tool_call.tool_definition_id = registered.definition.id
+        tool_call.tool_version = registered.definition.version
+        try:
+            with session.begin_nested(), traced_span(
+                stage="tool_handler",
+                function=registered.handler,
+                input={"tool_name": tool_name, "arguments": arguments},
+                turn_id=turn.id,
+            ) as handler_span:
+                output = registered.handler(
+                    session,
+                    agent.world_id,
+                    {
                         **arguments,
                         "_agent_id": agent.id,
                         "_tool_call_id": tool_call.id,
-                    }
-                    assert registered.handler is not None
-                    output = registered.handler(
-                        session, agent.world_id, handler_arguments
+                    },
+                )
+                self._validate_handler_output(
+                    session,
+                    output.events,
+                    registered.definition.produced_event_types,
+                )
+                if handler_span is not None:
+                    handler_span.set_output(
+                        {
+                            "result": output.result,
+                            "event_types": [event.event_type for event in output.events],
+                        }
                     )
-                    self._validate_handler_output(
-                        session,
-                        output.events,
-                        registered.definition.produced_event_types,
-                    )
+                with traced_span(
+                    stage="event",
+                    function="persist_world_events",
+                    input={"event_count": len(output.events)},
+                    turn_id=turn.id,
+                ):
                     for pending in output.events:
                         session.add(
                             WorldEvent(
@@ -112,27 +201,44 @@ class ManualToolExecutor:
                             )
                         )
                         session.flush()
-            except Exception as exc:
-                return self._fail(
+        except Exception as exc:
+            return (
+                self._fail(
                     turn,
                     tool_call,
                     ToolCallStatus.EXECUTION_FAILED,
                     str(exc),
                     self._simulation_time(session, agent.world_id),
-                )
+                ),
+                turn.id,
+            )
 
-            tool_call.status = ToolCallStatus.SUCCEEDED
-            tool_call.result_json = output.result
-            tool_call.completed_at = self._simulation_time(session, agent.world_id)
-            turn.status = TurnStatus.COMPLETED
-            turn.tool_calls_used = 1
-            turn.ended_at = tool_call.completed_at
-            return ToolExecutionResult(
+        tool_call.status = ToolCallStatus.SUCCEEDED
+        tool_call.result_json = output.result
+        tool_call.completed_at = self._simulation_time(session, agent.world_id)
+        turn.status = TurnStatus.COMPLETED
+        turn.tool_calls_used = 1
+        turn.ended_at = tool_call.completed_at
+        emit_trace_event(
+            "tool.completed",
+            turn_id=turn.id,
+            sequence=tool_call.sequence_number,
+            data={
+                "tool_call_id": tool_call.id,
+                "tool_name": tool_name,
+                "status": tool_call.status.value,
+                "success": True,
+            },
+        )
+        return (
+            ToolExecutionResult(
                 call_id=tool_call.id,
                 tool_name=tool_name,
                 success=True,
                 result=output.result,
-            )
+            ),
+            turn.id,
+        )
 
     @staticmethod
     def _resolve_agent(
@@ -247,6 +353,18 @@ class ManualToolExecutor:
         turn.status = TurnStatus.FAILED
         turn.tool_calls_used = 1
         turn.ended_at = completed_at
+        emit_trace_event(
+            "tool.completed",
+            turn_id=turn.id,
+            sequence=tool_call.sequence_number,
+            data={
+                "tool_call_id": tool_call.id,
+                "tool_name": tool_call.tool_name,
+                "status": status.value,
+                "success": False,
+                "error": error,
+            },
+        )
         return ToolExecutionResult(
             call_id=tool_call.id,
             tool_name=tool_call.tool_name,

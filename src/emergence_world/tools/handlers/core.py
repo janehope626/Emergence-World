@@ -108,9 +108,17 @@ def go_to_place(
     if state is None:
         raise ValueError("agent state not found")
     previous = session.get(Landmark, state.current_landmark_id)
+    if previous is not None and previous.id == destination.id:
+        return HandlerOutput(
+            {"from": previous.name, "to": destination.name, "moved": False}
+        )
     state.current_landmark_id = destination.id
     return HandlerOutput(
-        {"from": previous.name if previous else None, "to": destination.name},
+        {
+            "from": previous.name if previous else None,
+            "to": destination.name,
+            "moved": True,
+        },
         (
             PendingEvent(
                 "agent_moved",
