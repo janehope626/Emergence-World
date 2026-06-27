@@ -225,3 +225,23 @@ def test_trace_broker_reports_queue_gaps_and_removes_closed_loops() -> None:
     assert broker.subscriber_count == 1
     broker.publish(trace_stream_event("test"))
     assert broker.subscriber_count == 0
+
+
+def test_demo_trace_initializes_database_and_is_repeatable(tmp_path: Path) -> None:
+    database = tmp_path / "demo.db"
+    runner = CliRunner()
+
+    first = runner.invoke(cli_app, ["demo-trace", "--database", str(database)])
+    second = runner.invoke(cli_app, ["demo-trace", "--database", str(database)])
+
+    assert first.exit_code == 0, first.stdout
+    assert second.exit_code == 0, second.stdout
+    session_factory = create_sync_session_factory(
+        create_sync_database_engine(sync_sqlite_url(database))
+    )
+    with session_factory() as session:
+        commands = session.scalars(
+            select(CommandExecution).order_by(CommandExecution.started_at)
+        ).all()
+        assert len(commands) == 2
+        assert all(command.status == "completed" for command in commands)

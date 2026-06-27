@@ -430,3 +430,154 @@ git diff --check: passed
 
   因此现在不应开始第三阶段。应先把跨进程事件传输和 WebSocket 测试闭环，否则前端只能查询 REST，无法可靠实时更新。
   历史记录已同步。
+
+## 用户请求 18
+
+> 阅读我的项目，并根据最新的codex-instruct-history给出下一步应该做什么
+
+## 助手核查与建议 18
+
+助手重新核对当前代码、Git 状态、最新历史、FastAPI Trace API、WebSocket
+outbox、数据库迁移、测试和前端文件。确认第二阶段已经完成，当前后端具备只读
+REST、跨进程 WebSocket/outbox、分页、过滤、payload 鉴权和 Trace 保留能力。
+
+当前验证结果：91 tests passed；Ruff、MyPy、Alembic check 和 Replay 通过；Git
+工作区当时干净。虽然最新提交标题为 `add frontend to see all the instructions in
+run`，仓库实际没有 package.json、TypeScript 或 React 文件，因此建议下一步进入
+第三阶段，创建真正的 Trace 可视化前端。
+
+建议顺序：React/Vite 基础工程、Trace Explorer、WebSocket 游标和对账、demo Trace、
+单元与 E2E 测试，最后加入 React Flow、Monaco 和 ECharts。
+
+## 用户请求 19
+
+> 按照上面的顺序执行
+
+## 助手实施状态 19
+
+助手按顺序开始第三阶段并完成以下代码：
+
+- 新增 `frontend/` React 19、TypeScript、Vite 工程。
+- 实现 Trace 列表及 world、stage、status 过滤。
+- 实现 Command、Span、Provider Interaction、ToolCall、WorldEvent 和 StateDiff
+  详情面板。
+- 使用 React Flow 展示 Span 父子调用图。
+- 使用 Monaco 展示只读结构化 JSON。
+- 使用 ECharts 展示阶段耗时以及 Span、Tool、Event、Diff 汇总。
+- 接入 `/ws/v1/traces`，持久化 committed `stream_sequence`；provisional 事件不推进
+  游标；收到 `stream.gap` 或 `command.committed` 后通过 REST 对账。
+- 新增 `world demo-trace`，可初始化空数据库并通过 scripted provider 生成一条完整
+  Trace，不访问外部模型；重复执行测试通过。
+- 新增 Vitest 单元测试和 Playwright E2E 测试。
+- 更新 README、前端运行文档、Observability 文档和 `.gitignore`。
+
+已验证：
+
+```text
+Frontend unit tests: 3 passed
+Frontend TypeScript/Vite production build: passed
+Frontend ESLint: passed
+Python demo-trace targeted test: passed
+Python Ruff/MyPy: passed
+demo-trace smoke: 12 spans, 31 state diffs
+```
+
+生产构建当前有单个 bundle 大于 500 kB 的非阻塞警告，后续可通过动态 import 和
+manualChunks 优化。
+
+Playwright E2E 尚未执行完成：测试服务器可以启动，但容器没有现成的 Chrome 或
+Chromium，Playwright 所需的 Chromium revision 也尚未下载。
+
+## 用户请求 20
+
+> 为什么不能使用已有的浏览器如chrome验证
+
+## 助手核查与说明 20
+
+助手检查容器中的 `google-chrome`、`google-chrome-stable`、`chromium` 和
+`chromium-browser`，均不存在。说明 Playwright 可以通过 `channel` 或
+`executablePath` 复用容器内已有浏览器，但不能访问用户本机浏览器；当前环境需要
+下载 Playwright 管理的 Chromium 或另行在容器内安装 Chrome。
+
+## 用户请求 21
+
+> 先将当前对话写入code-instruct-history，继续下载chromium
+
+## 助手执行 21
+
+助手将请求 18 至 21、第三阶段实施状态和验证结果追加到本文件。下一步继续下载
+Playwright Chromium，并在下载后运行端到端测试和剩余全量验证。
+
+后续执行结果：Playwright Chromium、Headless Shell、FFmpeg 及所需 Linux 动态库
+安装完成；Trace Explorer Playwright E2E 测试通过（1 passed）。
+
+最终完整验证：Python 92 tests passed；前端 Vitest 3 tests passed；Playwright E2E
+1 test passed；Ruff、MyPy、ESLint、TypeScript、Vite production build、Alembic check、
+Replay 和 `git diff --check` 全部通过。Vite 已按 React、React Flow、ECharts 和
+Monaco 拆分 production chunks，初始业务 bundle 约 11 kB。
+
+## 用户请求 22
+
+> 将结果写到instruct
+
+## 助手执行 22
+
+助手将第三阶段最终结果归档到本记录。当前完成状态：
+
+- React/TypeScript/Vite Trace Explorer 已完成。
+- Trace REST 查询、WebSocket 实时流、committed cursor、provisional 状态和 gap 后
+  REST 对账已接入。
+- Command、Span、Provider、ToolCall、WorldEvent、StateDiff 六类数据可视化已完成。
+- React Flow 调用图、Monaco JSON 查看器和 ECharts 指标图已完成。
+- `world demo-trace` 可安全、重复地产生 scripted 演示 Trace。
+- Chromium、Headless Shell、FFmpeg 及 Playwright Linux 运行依赖已安装。
+- Python 92 tests、Vitest 3 tests、Playwright E2E 1 test 全部通过。
+- Ruff、MyPy、ESLint、TypeScript、Vite build、Alembic check、Replay 和
+  `git diff --check` 全部通过。
+
+运行方式：
+
+```bash
+source .venv/bin/activate
+world demo-trace
+world serve
+
+# 另一个终端
+cd frontend
+npm run dev
+```
+
+当前第三阶段修改仍位于工作区，尚未创建 Git commit。
+
+指导我前端如何使用
+
+
+• 按以下方式启动和使用。
+
+  ### 1. 启动后端
+
+  在项目根目录执行：
+
+  source .venv/bin/activate
+
+  # 首次使用先生成演示数据
+  world demo-trace
+
+  # 启动 REST + WebSocket 服务
+  world serve --host 0.0.0.0 --port 8000
+
+  保持该终端运行。
+
+  ### 2. 启动前端
+
+  打开第二个终端：
+
+  cd /workspaces/codespaces-blank/Emergence-World/frontend
+  npm install
+  npm run dev -- --host 0.0.0.0
+
+  浏览器访问：
+
+  http://localhost:5173
+
+  在 Codespaces 中，打开 Ports 面板，访问端口 5173 的转发地址。

@@ -55,6 +55,16 @@ Start the single-worker observability service:
 world serve --host 127.0.0.1 --port 8000
 ```
 
+Generate a safe scripted trace when developing the UI or testing an empty database:
+
+```bash
+world demo-trace
+```
+
+The command initializes an empty database when necessary and then executes one
+scripted autonomous turn. It never contacts an external model provider and can be
+run repeatedly.
+
 Configure explicit browser origins with `--cors-origins`. Full recorded span and
 provider payloads are disabled unless `EMERGENCE_TRACE_PAYLOAD_TOKEN` is set; clients
 must send the same value in `X-Trace-Payload-Token` and opt in with

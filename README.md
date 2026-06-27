@@ -64,6 +64,7 @@ Same world. Same rules. Same tools. **Different minds.** The results diverged dr
 ## Repository Structure
 
 ```
+├── frontend/                # React execution observatory
 ├── agent_profiles/          # Detailed profiles for all 10 agents
 ├── landmarks/               # World landmarks, buildings, and geography
 │   ├── README.md            # Overview and landmark categories

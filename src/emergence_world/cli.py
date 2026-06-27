@@ -828,6 +828,50 @@ def run_autonomous(
     )
 
 
+@app.command("demo-trace")
+def demo_trace(
+    database: Path = typer.Option(
+        Path("emergence_world.db"), help="SQLite database path."
+    ),
+    world: str | None = typer.Option(
+        None, help="World name when database has several."
+    ),
+    minutes: int = typer.Option(30, min=1, help="Simulated minutes advanced."),
+) -> None:
+    """Create one safe scripted trace for the observability UI."""
+
+    migrate_database(database)
+    session_factory = session_factory_for(database)
+    with sync_transaction(session_factory) as session:
+        if session.scalar(select(func.count()).select_from(World)) == 0:
+            import_seed_bundle(session, load_seed_bundle(), random_seed=1)
+        world_id = resolve_world_id(session, world)
+    result = asyncio.run(
+        run_one_autonomous_turn(
+            session_factory,
+            world_id,
+            scripted_turn_provider(1),
+            minutes,
+        )
+    )
+    with session_factory() as session:
+        command_id = session.scalar(
+            select(CommandExecution.id)
+            .where(CommandExecution.world_id == world_id)
+            .order_by(CommandExecution.started_at.desc())
+            .limit(1)
+        )
+    console.print_json(
+        data={
+            "command_id": command_id,
+            "turn_id": result.turn_id,
+            "agent": result.agent_name,
+            "provider": ScriptedProvider.provider_name,
+            "model": ScriptedProvider.model_name,
+        }
+    )
+
+
 @app.command("readiness-check")
 def readiness_check(
     database: Path = typer.Option(
