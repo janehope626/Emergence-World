@@ -374,3 +374,195 @@ Trace / StateDiff 记录变化
 ```
 
 最关键的工程边界是：YAML 决定工具契约和可见性，Python handler 决定真实行为，executor 决定安全校验、事务、审计和事件落库。
+
+## 3.Memory实验细节分析
+
+整体机制策略
+
+每个 agent 都有一套私有、分层、可审计的长期认知状态；agent 只能通过工具显式写入或整理记忆，系统在每次 autonomous turn，前按固定策略抽取一部分记忆放入上下文。
+
+  核心层次
+
+  1. Soul Entries
+     最深层身份锚点，存 agent 的信念、价值观、执念。通过 add_to_soul 写入，通过 list_soul_entries 读取。当前实现里 soul entry 不参与 self-care 归档，会始终
+     作为上下文候选进入。
+
+  2. Episodic Memory
+     常规长期记忆，agent 通过 add_to_longterm_memory 主动写入，包含：
+     content、importance、tags、active、archived_at。
+     检索工具是 retrieve_specific_memories，按关键词匹配内容，再按重要性和时间排序。
+
+  3. Diary
+     日记层，一天一条当前版本，可修订。write_diary 会根据当前 simulation date 写入或覆盖当天条目，同时留下 DiaryRevision，包含 mood/location 元数据。
+     read_diary 默认读最近若干条。
+
+  4. Conversation Records
+     对话记忆是每个 agent 私有视角下的 conversation record，记录 speaker、target、channel、content。它会作为最近社交上下文进入 memory context。
+
+  5. Relationship Graph
+     agent 对其他 agent 的主观关系模型。通过 assign_relationship 写入/更新，包含：
+     relationship_type、rationale、trust_score、affinity_score、interaction_count。
+     每次更新也会产生 revision，便于追踪关系变化。
+
+  6. Memory Summary
+     self-care 触发的压缩层。当前 reproduction 实现里不是 LLM 摘要，而是确定性算法 deterministic_summary_v1：统计 top tags，选出高 importance 记忆作为
+     highlights，生成 summary。
+
+Self-Care 流程
+
+  self_care 是记忆整理工具，有严格条件：
+
+  - agent 必须在自己的 home landmark。
+  - 至少有 30 条 active episodic memories。
+  - 一次最多处理 500 条。
+  - 生成一条 MemorySummary。
+  - 原始 episodic memories 被标记为 inactive，并写入 archived_at。
+  - MemorySummarySource 保存 summary 和原始 memory 的来源关系。
+  - 产生 memory_summarized 和 memory_archived 事件。
+
+  所以它不是删除记忆，而是把明细归档，再用 summary 维持长期可用信息密度。
+
+  进入上下文的策略
+
+  每次 autonomous turn 前，assemble_autonomous_context 会调用 build_memory_context。这个过程会构造并审计 agent 的私有 memory context：
+
+  - soul：全部选入。
+  - diary：最近 5 条选入。
+  - conversation：最近 5 条选入。
+  - relationships：全部选入。
+  - episodic memories：默认最多 10 条，按 关键词匹配 + importance 排序。
+  - summaries：只有当没有 episodic memory 被选中时，才补充最近 summary。
+
+  重要的是：系统会把每个候选项、分数、是否入选、排除原因写入 context_memory_candidates 和 context_memory_selections。这让实验可以回放和解释“为什么 agent 当
+  时看到了这些记忆”。
+
+  整体特点
+
+  当前实现的 memory 机制偏“可复现、可审计”，不是向量数据库式语义检索。它通过明确的数据表、工具调用、事件、revision 和 context build 审计，把 agent 的长期身
+  份、经验、日记、关系和对话压缩进每次决策上下文。文档中提到的 LLM summarization / neural link 等更完整机制属于整体设计描述；当前代码里已实现的重点是确定性
+  memory 写入、检索、self-care 摘要和上下文选择审计。
+
+
+
+• 和文档层的 memory 设计相比，你当前代码实现的是一个“确定性、可审计的 memory 子集”。主要缺失如下。
+
+  明显缺失
+
+  1. Neural Link 记忆共享未实现
+     文档设计有：
+     neural_link_request_memory、neural_link_share_memory、2 分钟接受窗口、完整 memory bank 复制。
+
+     代码里目前没有：
+      - 工具定义
+      - handler
+      - 请求/授权/过期状态表
+      - memory transfer 事件
+      - 防重放或权限校验
+      - 测试覆盖
+
+  2. LLM 摘要未实现
+     文档里 self-care 会用 LLM 对旧记忆进行连贯叙事摘要。
+
+     当前代码用的是 deterministic_summary_v1：
+      - 统计 top tags
+      - 选 importance 最高的几条 highlights
+      - 生成固定格式 summary
+
+     这对复现很好，但不等同于文档中的认知总结能力。
+
+  3. Conversation archival / conversation summary 不完整
+     文档提到 conversation history 最多 1000 条，self-care 会归档和摘要对话。
+
+     当前代码有 ConversationRecord，也会进入 context，但没有看到：
+      - conversation self-care 归档逻辑
+      - conversation summary 表或机制
+      - conv_summarized_until 水位线
+      - 1000 条触发阈值
+
+  4. Archived memories 独立层未实现
+     文档把 archived memories 当作归档区。
+
+     当前实现是把 EpisodicMemory.active = False，并设置 archived_at，再用 MemorySummarySource 关联 summary 来源。功能上接近，但没有独立 archived memory
+     bank，也没有归档检索工具。
+
+  5. Memory 检索比较简单
+     文档暗示长期认知系统会支持更丰富的记忆调取。
+
+     当前实现主要是：
+      - retrieve_specific_memories：content 字符串 contains 查询
+      - context build：关键词 overlap + importance 排序
+      - 没有 embedding/vector search
+      - 没有 recency/importance/relationship/context 多因素综合策略
+      - 没有跨 summary 和 archived memory 的深度召回
+
+  6. Soul Entry 管理不完整
+     文档说 soul entries 可以由 agent 手动 add/remove。
+
+     当前有：
+      - add_to_soul
+      - list_soul_entries
+
+     但没有看到：
+      - remove/deactivate soul entry 工具
+      - revise soul entry 工具
+      - soul 冲突检测或审计策略
+
+  7. Diary 搜索能力不足
+     文档说 diary 可按 keyword 和 date 搜索。
+
+     当前有：
+      - write_diary
+      - read_diary 最近 N 条
+
+     但缺少：
+      - 按日期读取
+      - 按关键词搜索
+      - 日期范围查询
+
+  8. Relationship Graph 比文档简化
+     当前实现有 directional relationship、trust、affinity、interaction_count、revision。
+
+     但文档里的关系层更丰富，当前缺少或较弱：
+      - emotional tone 字段
+      - first_met_at
+      - relationship history 的结构化展开
+      - 自动由 conversation/social event 更新关系
+      - 关系摘要或社会网络层分析
+
+  9. Memory token ceiling / budget 管理未实现
+     文档提到：
+      - token ceiling 100,000
+      - post-summary ceiling 50,000
+
+     当前 context build 是条数限制：
+      - episodic 默认 10
+      - diary/recent conversation 默认 5
+      - 没有 token 估算
+      - 没有根据 prompt budget 动态裁剪
+
+  10. Memory privacy / consent 模型还不完整
+     当前 memory 基本是 agent 私有状态；这部分是有的。
+
+  但文档中 neural link 引入了授权共享，所以还需要：
+
+  - 请求方/授权方状态
+  - 过期窗口
+  - 可共享范围
+  - 拒绝事件
+  - 审计记录
+  - 防止 agent 绕过 consent 读取他人 memory
+
+  已经实现得比较扎实的部分
+
+  - 私有 episodic memory 写入与检索
+  - soul entry 写入与上下文注入
+  - diary 写入、修订和 revision
+  - relationship 写入、修订和审计
+  - self-care 对 episodic memory 的归档和 summary
+  - context build 候选、分数、入选、排除原因审计
+  - memory 相关事件进入 replay/trace 体系
+
+  一句话判断
+
+  你的代码目前实现了 memory 系统的“可复现内核”：私有记忆、日记、关系、身份锚点、确定性摘要和上下文选择审计。文档设计中更高级的部分还缺失，尤其是 Neural
+  Link 共享、LLM 认知摘要、conversation 归档摘要、token budget 管理、diary 搜索和完整 consent/privacy 流程。
