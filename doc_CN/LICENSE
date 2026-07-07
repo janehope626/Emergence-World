@@ -1,0 +1,47 @@
+Emergence World — 仅研究用途许可声明
+================================================
+
+Copyright (c) 2026 Emergence AI. All rights reserved.
+
+本仓库（包括所有文档、agent 档案、地标描述、工具目录、治理文档、数据集、指标以及任何其他内容）依据 **Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)** 向公众授权。
+
+你可以自由地：
+  - **分享**：为非商业研究和教育目的，以任何媒介或格式复制和再分发材料。
+  - **改编**：为非商业研究和教育目的，对材料进行混合、转换和再创作。
+
+但须遵守以下条款：
+  - **署名 (BY)**：你**必须**适当地署名 Emergence AI，提供指向本仓库的链接 (https://github.com/EmergenceAI/Emergence-World)，并说明是否进行了修改。你可以用任何合理方式完成这些要求，但不得以任何暗示 Emergence AI 认可你或你的使用方式的形式进行。用于学术和研究时，也请包含 README 中提供的引用块。
+  - **非商业 (NC)**：你不得将材料用于商业目的。这包括但不限于：出售或再许可材料、将其并入商业产品或服务，或使用工具调用数据集（或本仓库任何部分）训练、微调、评估或基准测试商业 AI 模型。
+
+无额外限制：你不得施加法律条款或技术措施，从法律上限制他人进行许可证允许的任何行为。
+
+声明：
+  - 对于属于公有领域的材料元素，或你的使用受到适用例外或限制允许的情形，你无需遵守许可证。
+  - 不提供任何担保。该许可证可能没有授予你预期用途所需的全部权限。例如，公开权、隐私权或精神权利等其他权利可能限制你使用材料的方式。
+
+署名格式
+------------------
+引用、再分发或改编本仓库任何部分时，请基本按以下形式包含署名：
+
+    "Emergence World" by Emergence AI, licensed under CC BY-NC 4.0.
+    Source: https://github.com/EmergenceAI/Emergence-World
+
+用于学术出版时，请使用仓库 README 中提供的 BibTeX 引用。
+
+商业使用和模型训练
+---------------------------------
+任何超出 CC BY-NC 4.0 范围的使用，包括任何形式的商业使用，或出于任何商业目的使用本仓库中的任何内容或数据训练、微调、评估或基准测试 AI/ML 模型，都需要事先获得 Emergence AI 的书面许可。
+
+许可咨询请联系：world@emergence.ai
+
+完整许可证文本
+-----------------
+Creative Commons Attribution-NonCommercial 4.0 International License 的完整法律文本可在以下地址获取：
+
+    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+
+面向普通读者的摘要可在以下地址获取：
+
+    https://creativecommons.org/licenses/by-nc/4.0/
+
+通过使用、复制、再分发或改编本仓库的任何部分，即表示你同意受上述条款约束。
