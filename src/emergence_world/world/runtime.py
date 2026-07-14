@@ -1,3 +1,4 @@
+# 编排确定性或自主世界步进，串联需求、调度、回合、事件与时钟更新。
 """Deterministic headless world stepping."""
 
 from __future__ import annotations

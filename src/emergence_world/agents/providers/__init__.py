@@ -1,3 +1,4 @@
+# 暴露各模型提供方实现及其公共配置类型。
 """Provider-neutral and local decision providers."""
 
 from emergence_world.agents.providers.base import AgentProvider

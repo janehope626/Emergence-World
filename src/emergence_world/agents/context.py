@@ -1,3 +1,4 @@
+# 从数据库中的世界和智能体状态构建基础决策上下文。
 """Deterministic assembly of read-only agent context."""
 
 from __future__ import annotations

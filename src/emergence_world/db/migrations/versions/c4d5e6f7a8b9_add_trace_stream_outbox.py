@@ -1,3 +1,4 @@
+# 新增事务性追踪事件发件箱的数据库迁移。
 """add trace stream outbox
 
 Revision ID: c4d5e6f7a8b9

@@ -1,3 +1,4 @@
+# 汇总执行追踪、状态差异、脱敏、查询和实时事件能力。
 """Structured execution tracing and state-difference utilities."""
 
 from emergence_world.observability.state_diff import SnapshotChange, diff_snapshots

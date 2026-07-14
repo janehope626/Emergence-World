@@ -1,3 +1,4 @@
+# 创建同步/异步数据库引擎、会话工厂和事务上下文。
 """Async database engine and transaction management."""
 
 from __future__ import annotations

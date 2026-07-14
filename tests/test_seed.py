@@ -1,3 +1,4 @@
+# 覆盖种子数据校验、导入幂等性与初始世界构建。
 """Structured Seed Data validation and import tests."""
 
 from __future__ import annotations

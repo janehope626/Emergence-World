@@ -1,3 +1,4 @@
+# 识别并遮蔽配置中的敏感值，防止密钥进入审计与追踪数据。
 """Secret redaction and leak detection for provider audit boundaries."""
 
 from __future__ import annotations

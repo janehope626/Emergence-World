@@ -1,3 +1,4 @@
+# 编排单个智能体回合：请求模型决策、执行工具并汇总结果。
 """Provider-neutral agent turn runtime."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+// 定义前端追踪列表、明细资源与实时流事件的数据类型。
 export type TraceSummary = {
   id: string
   world_id: string

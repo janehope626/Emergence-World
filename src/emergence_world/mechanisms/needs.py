@@ -1,3 +1,4 @@
+# 按世界时间推进智能体需求衰减，并处理能量耗尽状态。
 """Deterministic need decay and survival rules."""
 
 from __future__ import annotations

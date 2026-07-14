@@ -1,3 +1,4 @@
+# 持久化模型提供方的请求、响应与失败信息，形成可追溯的审计记录。
 """Persistence audit for provider requests and structured decisions."""
 
 from __future__ import annotations

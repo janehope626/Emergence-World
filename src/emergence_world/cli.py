@@ -1,3 +1,4 @@
+# 定义世界初始化、运行、检查、追踪、回放和指标计算等命令行入口。
 """Command-line interface for world initialization and inspection."""
 
 from __future__ import annotations

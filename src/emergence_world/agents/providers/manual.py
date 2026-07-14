@@ -1,3 +1,4 @@
+# 提供由人工直接输入决策的模型提供方实现。
 """Manual decision provider for CLI-driven mechanism validation."""
 
 from __future__ import annotations

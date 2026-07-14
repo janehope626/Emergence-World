@@ -1,3 +1,4 @@
+# 实现长期记忆、灵魂条目、日记、关系和自我照料等认知工具。
 """Private, deterministic, and event-audited memory tools."""
 
 from __future__ import annotations

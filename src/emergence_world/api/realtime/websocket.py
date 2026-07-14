@@ -1,3 +1,4 @@
+# 通过 WebSocket 按提交序号持续推送追踪事件，并处理断线补偿。
 """Trace WebSocket endpoint."""
 
 from __future__ import annotations

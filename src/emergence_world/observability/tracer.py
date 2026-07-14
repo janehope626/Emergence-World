@@ -1,3 +1,4 @@
+# 记录命令、跨度、模型交互、工具调用、事件和状态变化的完整执行链路。
 """Session-bound structured tracing for meaningful business boundaries."""
 
 from __future__ import annotations

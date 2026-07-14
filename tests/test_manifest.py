@@ -1,3 +1,4 @@
+# 覆盖实验清单生成、稳定哈希、代码快照与就绪性检查。
 """Experiment run manifest audit acceptance tests."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# 汇总数据库基类、会话工具和领域模型。
 """Portable database models, sessions, and migrations."""
 
 from emergence_world.db.base import Base

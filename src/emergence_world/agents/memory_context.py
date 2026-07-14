@@ -1,3 +1,4 @@
+# 对长期记忆进行检索、排序和预算裁剪，为当前回合选择最相关的记忆。
 """Audited deterministic construction of an agent's private memory context."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+// 管理追踪 WebSocket 连接、断线重连和序号持久化。
 import { useEffect, useRef, useState } from 'react'
 import type { StreamEvent } from './types'
 

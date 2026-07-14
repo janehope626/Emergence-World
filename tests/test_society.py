@@ -1,3 +1,4 @@
+# 覆盖经济、治理、社交和社会机制的领域规则。
 """Stage 2 acceptance tests for economy, communication, governance, and AWI."""
 
 from __future__ import annotations

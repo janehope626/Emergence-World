@@ -1,3 +1,4 @@
+# 根据轮转顺序和加速请求选择下一个可行动智能体。
 """Persistent round-robin and boost-turn scheduling."""
 
 from __future__ import annotations

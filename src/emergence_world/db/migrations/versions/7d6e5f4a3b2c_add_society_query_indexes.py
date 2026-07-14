@@ -1,3 +1,4 @@
+# 为社会机制的常用查询路径增加索引的数据库迁移。
 """add society query indexes
 
 Revision ID: 7d6e5f4a3b2c

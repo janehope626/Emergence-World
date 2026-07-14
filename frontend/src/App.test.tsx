@@ -1,3 +1,4 @@
+// 验证执行观测台的加载、选择与明细展示行为。
 import { render, screen } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import App from './App'

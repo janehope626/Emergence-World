@@ -1,3 +1,4 @@
+# 创建追踪查询服务，并在应用生命周期中管理数据库迁移与实时事件代理。
 """FastAPI application factory for the observability service."""
 
 from __future__ import annotations

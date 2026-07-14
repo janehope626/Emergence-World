@@ -1,3 +1,4 @@
+# 递归比较世界快照并生成稳定、可序列化的路径级差异。
 """Stable leaf-level differences for canonical world snapshots."""
 
 from __future__ import annotations

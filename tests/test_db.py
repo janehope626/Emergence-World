@@ -1,3 +1,4 @@
+# 覆盖数据库模型约束、关系、事务和迁移后的基础行为。
 """Database portability, migration, and invariant tests."""
 
 from __future__ import annotations

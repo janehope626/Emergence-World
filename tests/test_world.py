@@ -1,3 +1,4 @@
+# 覆盖世界时钟、事件投影、调度、步进与状态回放。
 """Acceptance tests for the deterministic Phase 1 world kernel."""
 
 from __future__ import annotations

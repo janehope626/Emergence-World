@@ -1,3 +1,4 @@
+# 构建并持久化可复现实验清单，包括代码、依赖、种子和提示词哈希。
 """Stable experiment run manifest construction and persistence."""
 
 from __future__ import annotations

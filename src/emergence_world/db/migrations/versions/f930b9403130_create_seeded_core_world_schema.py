@@ -1,3 +1,4 @@
+# 创建实验、世界、智能体、工具和事件等核心初始表的数据库迁移。
 """create seeded core world schema
 
 Revision ID: f930b9403130

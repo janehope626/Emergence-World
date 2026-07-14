@@ -1,3 +1,4 @@
+# 将声明式种子包幂等导入数据库，创建或更新世界初始状态。
 """Transactional and idempotent import of validated seed bundles."""
 
 from __future__ import annotations

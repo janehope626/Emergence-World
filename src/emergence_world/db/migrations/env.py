@@ -1,3 +1,4 @@
+# 配置 Alembic 在线与离线迁移环境，并注册项目 ORM 元数据。
 """Alembic environment for portable synchronous migrations."""
 
 from __future__ import annotations

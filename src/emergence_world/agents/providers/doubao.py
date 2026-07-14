@@ -1,3 +1,4 @@
+# 通过 OpenAI 兼容接口调用豆包模型，并把响应规范化为内部智能体决策。
 """Doubao/Volcengine Ark OpenAI-compatible chat provider."""
 
 from __future__ import annotations

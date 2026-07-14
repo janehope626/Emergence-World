@@ -1,3 +1,4 @@
+# 定义数据库模型共享的状态与类别枚举。
 """Database-independent enumerations used by persistence models."""
 
 from __future__ import annotations

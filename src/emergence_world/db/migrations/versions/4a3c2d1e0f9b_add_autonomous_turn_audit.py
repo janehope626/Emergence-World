@@ -1,3 +1,4 @@
+# 新增自主回合审计字段与模型交互记录的数据库迁移。
 """add autonomous turn audit
 
 Revision ID: 4a3c2d1e0f9b

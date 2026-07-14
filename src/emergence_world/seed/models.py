@@ -1,3 +1,4 @@
+# 定义并校验世界、智能体、地点、工具和宪法的种子数据格式。
 """Validated contracts for versioned structured seed data."""
 
 from __future__ import annotations

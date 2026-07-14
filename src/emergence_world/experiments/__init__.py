@@ -1,3 +1,4 @@
+# 暴露实验运行清单和就绪性检查接口。
 """Experiment run manifests and lifecycle auditing."""
 
 from emergence_world.experiments.manifest import (

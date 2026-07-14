@@ -1,3 +1,4 @@
+# 定义实时追踪 WebSocket 消息的数据结构。
 """WebSocket event contract."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# 提供 API 路由共用的数据库会话与敏感载荷访问授权依赖。
 """FastAPI request dependencies."""
 
 from __future__ import annotations

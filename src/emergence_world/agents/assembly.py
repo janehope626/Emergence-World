@@ -1,3 +1,4 @@
+# 将世界状态、记忆、附近实体和可用工具组装为一次智能体决策所需的完整上下文。
 """Database-backed assembly of complete autonomous turn contexts."""
 
 from __future__ import annotations

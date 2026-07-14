@@ -1,3 +1,4 @@
+# 新增加速回合请求表及相关约束的数据库迁移。
 """add boost turn requests
 
 Revision ID: 1c7d31dbcb45

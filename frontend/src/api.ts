@@ -1,3 +1,4 @@
+// 封装追踪查询 API，并组合一次命令执行的完整明细。
 import type { CommandTrace, Page, ProviderInteraction, Span, StateDiff, ToolCall, TraceDetails, TraceSummary, WorldEvent } from './types'
 
 const API = import.meta.env.VITE_API_BASE ?? '/api/v1'

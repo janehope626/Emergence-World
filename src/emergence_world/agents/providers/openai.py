@@ -1,3 +1,4 @@
+# 调用 OpenAI Responses 接口，并把工具调用响应转换为内部决策模型。
 """OpenAI Responses API provider with strict smoke-test boundaries."""
 
 from __future__ import annotations

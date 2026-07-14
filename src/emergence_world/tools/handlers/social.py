@@ -1,3 +1,4 @@
+# 实现面对面发言、私信和会话记录等社交工具。
 """Deterministic communication and reaction-queue handlers."""
 
 from __future__ import annotations

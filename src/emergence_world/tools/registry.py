@@ -1,3 +1,4 @@
+# 保存工具定义与处理器映射，并提供名称解析和注册校验。
 """Versioned tool definition and handler registry."""
 
 from __future__ import annotations

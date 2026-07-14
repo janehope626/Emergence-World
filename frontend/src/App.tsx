@@ -1,3 +1,4 @@
+// 执行观测台主界面：筛选追踪、展示阶段图并检查各类执行明细。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import ReactEChartsCore from 'echarts-for-react/lib/core'

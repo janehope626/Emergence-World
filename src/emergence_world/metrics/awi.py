@@ -1,3 +1,4 @@
+# 计算 Agent World Indicators，用于衡量人口、安全、探索、治理、社交与经济表现。
 """Observable Agent World Indicators and research diagnostics."""
 
 from __future__ import annotations

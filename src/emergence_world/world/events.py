@@ -1,3 +1,4 @@
+# 追加有序世界事件，并将事件投影到可回放状态快照。
 """Append-only world-event creation and replay reducers."""
 
 from __future__ import annotations

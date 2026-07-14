@@ -1,3 +1,4 @@
+# 实现积分发放、资助周期创建与结算等经济规则。
 """ComputeCredit ledger rules and Victory Arch settlement."""
 
 from __future__ import annotations

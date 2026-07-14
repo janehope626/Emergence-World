@@ -1,3 +1,4 @@
+// 配置 TypeScript React 源码的 ESLint 规则与忽略目录。
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

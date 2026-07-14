@@ -1,3 +1,4 @@
+# 查询、分页和清理已提交的执行追踪记录。
 """Read and retention operations for persisted execution traces."""
 
 from __future__ import annotations

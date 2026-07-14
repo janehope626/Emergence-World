@@ -1,3 +1,4 @@
+# 从数据库构建当前世界快照，并通过事件重放验证确定性状态。
 """Canonical current-state snapshots, hashing, and event replay."""
 
 from __future__ import annotations

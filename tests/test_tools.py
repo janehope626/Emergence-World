@@ -1,3 +1,4 @@
+# 覆盖工具注册、参数校验、位置限制、执行结果和错误回滚。
 """Acceptance tests for the audited manual Tool Runtime."""
 
 from __future__ import annotations

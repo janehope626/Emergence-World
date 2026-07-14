@@ -1,3 +1,4 @@
+# 装饰模型提供方，在不改变其行为的前提下记录调用审计信息。
 """Offline provider that records and replays saved provider responses."""
 
 from __future__ import annotations

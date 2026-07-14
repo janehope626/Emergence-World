@@ -1,3 +1,4 @@
+// 配置 Vite React 构建、测试环境和后端 API/WebSocket 代理。
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 

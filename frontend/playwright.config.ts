@@ -1,3 +1,4 @@
+// 配置端到端测试目录、本地开发服务器和浏览器基址。
 import { defineConfig } from '@playwright/test'
 
 export default defineConfig({

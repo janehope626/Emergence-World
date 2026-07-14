@@ -1,3 +1,4 @@
+# 定义智能体上下文、决策、工具调用和回合结果的数据契约。
 """Read-only contracts shared by agent context, providers, and runtime."""
 
 from __future__ import annotations

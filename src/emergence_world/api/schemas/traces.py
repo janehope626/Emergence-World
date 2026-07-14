@@ -1,3 +1,4 @@
+# 定义追踪查询接口使用的分页与资源响应模型。
 """Typed REST representations for execution tracing resources."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# 提供确定性的长期记忆摘要算法。
 """Deterministic memory consolidation primitives."""
 
 from __future__ import annotations

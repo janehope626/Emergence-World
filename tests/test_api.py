@@ -1,3 +1,4 @@
+# 覆盖追踪 HTTP API、授权规则与实时 WebSocket 行为。
 """Acceptance tests for the observability REST and WebSocket service."""
 
 from __future__ import annotations

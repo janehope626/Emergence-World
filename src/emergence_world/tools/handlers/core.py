@@ -1,3 +1,4 @@
+# 实现查看世界、移动和空闲等基础工具。
 """Deterministic handlers for the first manual tool set."""
 
 from __future__ import annotations

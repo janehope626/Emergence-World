@@ -1,3 +1,4 @@
+# 定义持久世界的完整 SQLAlchemy 领域模型及实体间关系。
 """Portable core persistence models for the deterministic world kernel."""
 
 from __future__ import annotations

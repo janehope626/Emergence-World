@@ -1,3 +1,4 @@
+# 校验工具可用性与参数，在事务中执行处理器并记录事件和追踪信息。
 """Validated, transactional, and auditable manual tool execution."""
 
 from __future__ import annotations

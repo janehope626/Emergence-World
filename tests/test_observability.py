@@ -1,3 +1,4 @@
+# 覆盖执行追踪、脱敏、状态差异、查询、清理和事件流。
 """Acceptance tests for structured execution tracing."""
 
 from __future__ import annotations

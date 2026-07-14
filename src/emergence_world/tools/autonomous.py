@@ -1,3 +1,4 @@
+# 将自主回合中的工具调用委托给事务型手动执行器。
 """Turn-bound tool execution for autonomous agent loops."""
 
 from __future__ import annotations

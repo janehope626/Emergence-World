@@ -1,3 +1,4 @@
+# 定义 ORM 声明基类以及统一的标识符和 UTC 时间生成函数。
 """Portable SQLAlchemy declarative base and naming conventions."""
 
 from __future__ import annotations

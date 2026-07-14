@@ -1,3 +1,4 @@
+# 实现提案提交、投票、评论、决议执行和宪法读取等治理工具。
 """Deterministic proposal and voting handlers."""
 
 from __future__ import annotations

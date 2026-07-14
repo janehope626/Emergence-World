@@ -1,3 +1,4 @@
+# 汇总智能体上下文、决策模型与运行时组件，并延迟加载可选实现。
 """Agent context, decision contracts, and provider-neutral runtime."""
 
 from __future__ import annotations

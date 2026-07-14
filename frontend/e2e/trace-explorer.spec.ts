@@ -1,3 +1,4 @@
+// 通过浏览器端到端验证追踪列表、阶段图和明细标签页。
 import { expect, test } from '@playwright/test'
 
 const command = { id: 'cmd-demo', world_id: 'world-demo', turn_id: 'turn-demo', name: 'run-autonomous', status: 'completed', started_at: '2026-06-22T10:00:00Z', completed_at: '2026-06-22T10:00:00.120Z', error: null }

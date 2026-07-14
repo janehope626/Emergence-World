@@ -1,3 +1,4 @@
+# 定义模型连通性检查配置以及可分类的提供方失败类型。
 """Provider smoke-test budgets and standardized failure boundaries."""
 
 from __future__ import annotations

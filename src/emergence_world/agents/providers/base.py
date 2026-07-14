@@ -1,3 +1,4 @@
+# 定义模型提供方必须实现的异步决策协议。
 """Provider-neutral agent decision interface."""
 
 from __future__ import annotations
@@ -25,3 +26,4 @@ class AgentProvider(Protocol):
     ) -> AgentDecision:
         """Choose structured tool calls from the supplied read-only context."""
 
+# 具体提供方只需遵守上述契约，运行时无需依赖某个模型 SDK。

@@ -1,3 +1,4 @@
+# 递归规范化追踪载荷，并遮蔽疑似敏感字段。
 """Recursive redaction for persisted observability payloads."""
 
 from __future__ import annotations

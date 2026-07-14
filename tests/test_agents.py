@@ -1,3 +1,4 @@
+# 覆盖智能体上下文构建、模型提供方、回合运行时与审计行为。
 """Tests for deterministic agent contracts and runtime boundaries."""
 
 from __future__ import annotations

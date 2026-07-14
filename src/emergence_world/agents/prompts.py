@@ -1,3 +1,4 @@
+# 加载智能体回合提示词，并计算稳定哈希以支持实验复现。
 """Versioned provider prompt loading and hashing."""
 
 from __future__ import annotations

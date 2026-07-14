@@ -1,3 +1,4 @@
+# 实现支付、偷取积分、恢复能量和购买加速回合等经济工具。
 """Deterministic ComputeCredit economy handlers."""
 
 from __future__ import annotations

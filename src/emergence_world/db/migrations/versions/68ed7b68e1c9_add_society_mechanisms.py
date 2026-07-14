@@ -1,3 +1,4 @@
+# 新增消息、提案、投票、关系和积分账本等社会机制表的数据库迁移。
 """add society mechanisms
 
 Revision ID: 68ed7b68e1c9

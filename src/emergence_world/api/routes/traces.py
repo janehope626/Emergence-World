@@ -1,3 +1,4 @@
+# 提供命令追踪、跨度、模型交互、工具调用、事件和状态差异的查询端点。
 """Read-only execution trace REST resources."""
 
 from __future__ import annotations

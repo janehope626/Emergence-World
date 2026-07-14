@@ -1,3 +1,4 @@
+# 按预设序列返回确定性决策，供测试和可复现实验使用。
 """Deterministic provider for tests and reproducible manual scenarios."""
 
 from __future__ import annotations

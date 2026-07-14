@@ -1,3 +1,4 @@
+# 覆盖记忆写入、检索、摘要、日记、灵魂条目与关系修订。
 """Phase-one acceptance tests for private deterministic memory."""
 
 from __future__ import annotations

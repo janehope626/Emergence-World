@@ -1,3 +1,4 @@
+# 新增命令执行、跨度和状态差异追踪结构的数据库迁移。
 """add execution tracing
 
 Revision ID: a2b3c4d5e6f7

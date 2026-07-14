@@ -1,3 +1,4 @@
+# 覆盖自主回合编排、工具调用、预算限制与失败恢复。
 """Acceptance tests for complete autonomous turn closure."""
 
 from __future__ import annotations

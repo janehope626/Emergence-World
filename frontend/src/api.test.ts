@@ -1,3 +1,4 @@
+// 验证 API 查询参数、响应组合和失败处理。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { listTraces, loadTrace } from './api'
 

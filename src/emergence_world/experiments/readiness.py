@@ -1,3 +1,4 @@
+# 汇总测试、迁移、回放、审计和配置检查，判断实验是否可以启动。
 """Readiness checks for audited autonomous experiment execution."""
 
 from __future__ import annotations

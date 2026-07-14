@@ -1,3 +1,4 @@
+# 实现资助提案的提交、浏览和投票工具。
 """Victory Arch pitch-cycle handlers."""
 
 from __future__ import annotations

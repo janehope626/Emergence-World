@@ -1,3 +1,4 @@
+# 新增长期记忆、日记、灵魂条目与关系修订结构的数据库迁移。
 """add memory system
 
 Revision ID: 9b4d2f6a7c81

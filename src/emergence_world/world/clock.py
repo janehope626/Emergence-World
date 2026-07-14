@@ -1,3 +1,4 @@
+# 推进模拟时钟并保证世界时间单调递增。
 """Deterministic simulated-world clock."""
 
 from __future__ import annotations

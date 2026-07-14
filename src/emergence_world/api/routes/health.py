@@ -1,3 +1,4 @@
+# 提供轻量级服务健康检查端点。
 """Service health endpoint."""
 
 from fastapi import APIRouter

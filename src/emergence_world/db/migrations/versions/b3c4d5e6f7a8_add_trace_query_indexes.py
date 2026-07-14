@@ -1,3 +1,4 @@
+# 为追踪检索与清理操作增加复合索引的数据库迁移。
 """add trace query indexes
 
 Revision ID: b3c4d5e6f7a8

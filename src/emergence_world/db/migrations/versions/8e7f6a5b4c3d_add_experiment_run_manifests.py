@@ -1,3 +1,4 @@
+# 新增实验运行清单及可复现性元数据的数据库迁移。
 """add experiment run manifests
 
 Revision ID: 8e7f6a5b4c3d

@@ -1,3 +1,4 @@
+# 在进程内分发已提交的追踪事件，并维护订阅者队列。
 """Thread-safe in-process delivery of lightweight live trace events."""
 
 from __future__ import annotations
